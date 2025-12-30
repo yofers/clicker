@@ -16,12 +16,33 @@ const longPressDuration = ref(1000)
 const message = ref('按下 Ctrl+F8 (或 Ctrl+Fn+F8) 启动/停止')
 
 const keys = [
-  'Space', 'Enter', 'Tab', 'Esc', 'Backspace', 'Delete',
-  'Up', 'Down', 'Left', 'Right',
-  'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
-  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-  'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+  { value: 'Space', label: 'Space (空格)' },
+  { value: 'Enter', label: 'Enter (回车)' },
+  { value: 'Tab', label: 'Tab (制表)' },
+  { value: 'Esc', label: 'Esc (退出)' },
+  { value: 'Backspace', label: 'Backspace (退格)' },
+  { value: 'Delete', label: 'Delete (删除)' },
+  { value: 'Up', label: 'Up (上)' },
+  { value: 'Down', label: 'Down (下)' },
+  { value: 'Left', label: 'Left (左)' },
+  { value: 'Right', label: 'Right (右)' },
+  { value: 'F1', label: 'F1' }, { value: 'F2', label: 'F2' }, { value: 'F3', label: 'F3' },
+  { value: 'F4', label: 'F4' }, { value: 'F5', label: 'F5' }, { value: 'F6', label: 'F6' },
+  { value: 'F7', label: 'F7' }, { value: 'F8', label: 'F8' }, { value: 'F9', label: 'F9' },
+  { value: 'F10', label: 'F10' }, { value: 'F11', label: 'F11' }, { value: 'F12', label: 'F12' },
+  { value: 'A', label: 'A' }, { value: 'B', label: 'B' }, { value: 'C', label: 'C' },
+  { value: 'D', label: 'D' }, { value: 'E', label: 'E' }, { value: 'F', label: 'F' },
+  { value: 'G', label: 'G' }, { value: 'H', label: 'H' }, { value: 'I', label: 'I' },
+  { value: 'J', label: 'J' }, { value: 'K', label: 'K' }, { value: 'L', label: 'L' },
+  { value: 'M', label: 'M' }, { value: 'N', label: 'N' }, { value: 'O', label: 'O' },
+  { value: 'P', label: 'P' }, { value: 'Q', label: 'Q' }, { value: 'R', label: 'R' },
+  { value: 'S', label: 'S' }, { value: 'T', label: 'T' }, { value: 'U', label: 'U' },
+  { value: 'V', label: 'V' }, { value: 'W', label: 'W' }, { value: 'X', label: 'X' },
+  { value: 'Y', label: 'Y' }, { value: 'Z', label: 'Z' },
+  { value: '0', label: '0' }, { value: '1', label: '1' }, { value: '2', label: '2' },
+  { value: '3', label: '3' }, { value: '4', label: '4' }, { value: '5', label: '5' },
+  { value: '6', label: '6' }, { value: '7', label: '7' }, { value: '8', label: '8' },
+  { value: '9', label: '9' }
 ]
 
 const switchAppMode = () => {
@@ -131,7 +152,7 @@ onMounted(async () => {
     <div v-else class="input-group">
       <label>键盘按键</label>
       <select v-model="key" :disabled="isRunning">
-        <option v-for="k in keys" :key="k" :value="k">{{ k }}</option>
+        <option v-for="k in keys" :key="k.value" :value="k.value">{{ k.label }}</option>
       </select>
     </div>
 

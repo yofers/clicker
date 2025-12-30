@@ -66,17 +66,19 @@ func (a *App) StartClicking(interval int, mode string, keyOrButton string, click
 	}
 
 	go func() {
-		if clickType == "hold" {
-			// Add a small delay to allow user to release the shortcut keys (e.g. Ctrl+F8)
-			// otherwise the system might interpret it as Ctrl+Click
-			time.Sleep(500 * time.Millisecond)
+		// Global delay for both Clicker and Presser modes
+		// This prevents shortcut interference (e.g. Ctrl+F8 being interpreted as Ctrl+Click)
+		// and gives user time to release keys.
+		time.Sleep(1000 * time.Millisecond)
 
-			// Check if stopped during sleep
-			select {
-			case <-a.stopChan:
-				return
-			default:
-			}
+		// Check if stopped during sleep
+		select {
+		case <-a.stopChan:
+			return
+		default:
+		}
+
+		if clickType == "hold" {
 
 			// Hold mode: Press Down -> Wait Stop -> Press Up
 			if mode == "mouse" {
