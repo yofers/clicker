@@ -92,4 +92,6 @@ Clicker 是一个基于 [Wails](https://wails.io/) 构建的跨平台自动点�
 欢迎提交 Issue 或 Pull Request 来改进这个项目！
 
 ## 📄 许可证
-MIT License
+本项目基于 [MIT License](LICENSE) 开源。详情请参阅 LICENSE 文件。
+
+
