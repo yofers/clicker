@@ -1,13 +1,13 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "点击器",
-  "outputfilename": "点击器",
+  "name": "Clicker",
+  "outputfilename": "clicker-release-v1.0.0",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "mahiro",
-    "email": "tanyunhui86@163.com"
+    "name": "yofer",
+    "email": "yuheisora@gmail.com"
   }
 }

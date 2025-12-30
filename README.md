@@ -1,6 +1,6 @@
-# AutoClicker (连点器 & 长按器)
+# Clicker点击器 (连点器 & 长按器)
 
-AutoClicker 是一个基于 [Wails](https://wails.io/) 构建的跨平台自动点击/长按工具，支持 macOS 和 Windows。它拥有现代化的 Glassmorphism UI 设计，提供灵活的鼠标和键盘模拟功能。
+Clicker 是一个基于 [Wails](https://wails.io/) 构建的跨平台自动点击/长按工具，支持 macOS 和 Windows。它拥有现代化的 Glassmorphism UI 设计，提供灵活的鼠标和键盘模拟功能。
 
 ## ✨ 主要功能
 
@@ -33,8 +33,8 @@ AutoClicker 是一个基于 [Wails](https://wails.io/) 构建的跨平台自动�
 
 1. 克隆项目：
    ```bash
-   git clone https://github.com/yourusername/AutoClicker.git
-   cd AutoClicker
+   git clone https://github.com/yofers/clicker.git
+   cd clicker
    ```
 
 2. 安装依赖：
@@ -85,7 +85,7 @@ AutoClicker 是一个基于 [Wails](https://wails.io/) 构建的跨平台自动�
 
 1. 点击“启动”或按下快捷键时，系统会弹出权限请求提示。
 2. 点击“打开系统设置”。
-3. 在“隐私与安全性” -> “辅助功能”列表中，找到 `AutoClicker` (或终端应用) 并开启开关。
+3. 在“隐私与安全性” -> “辅助功能”列表中，找到 `Clicker` (或终端应用) 并开启开关。
 4. 如果授权后仍无效，尝试重启应用。
 
 ## 🤝 贡献
