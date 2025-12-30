@@ -1,0 +1,53 @@
+# Wails
+build/bin/
+frontend/dist/
+frontend/node_modules/
+
+# IDE / Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# System
+.AppleDouble
+.LSOverride
+
+# Go
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+
+# Vite
+frontend/.vite/
+
+# Local Env Files
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/
