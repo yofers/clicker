@@ -1,19 +1,23 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { StartClicking, StopClicking, CheckPermission } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
 import bgImage from './assets/backgrounds/background.jpg'
 
-const isRunning = ref(false)
+const isRunning = ref(false) // Deprecated global state
+const mouseRunMode = ref(null) // 'clicker', 'presser' or null
+const keyboardRunMode = ref(null) // 'clicker', 'presser' or null
+const activeTasks = ref([]) // Array of task info strings
+
 const appMode = ref('clicker') // 'clicker' or 'presser'
 const interval = ref(1000)
 const mode = ref('mouse') // 'mouse' or 'keyboard'
-const button = ref('left')
-const key = ref('Space')
+const buttons = ref(['left'])
+const selectedKeys = ref(['Space'])
 const clickType = ref('single')
 const longPressDuration = ref(1000)
-const message = ref('按下 Ctrl+F8 (或 Ctrl+Fn+F8) 启动/停止')
+const message = ref('')
 
 const keys = [
   { value: 'Space', label: 'Space (空格)' },
@@ -45,8 +49,43 @@ const keys = [
   { value: '9', label: '9' }
 ]
 
+// Computed states for UI locking
+const isMouseBusy = computed(() => !!mouseRunMode.value)
+const isKeyboardBusy = computed(() => !!keyboardRunMode.value)
+
+const shouldDisableMouseBtn = computed(() => {
+    // Disable Mouse Mode button if Mouse is running in a DIFFERENT appMode
+    return mouseRunMode.value && mouseRunMode.value !== appMode.value
+})
+
+const shouldDisableKeyboardBtn = computed(() => {
+    // Disable Keyboard Mode button if Keyboard is running in a DIFFERENT appMode
+    return keyboardRunMode.value && keyboardRunMode.value !== appMode.value
+})
+
+const shouldDisableInputs = computed(() => {
+    // Disable inputs if the current device is busy anywhere
+    // If I am on Mouse, and Mouse is busy (in any mode), lock inputs
+    if (mode.value === 'mouse') return isMouseBusy.value
+    if (mode.value === 'keyboard') return isKeyboardBusy.value
+    return false
+})
+
+const addKey = () => selectedKeys.value.push('Space')
+const removeKey = (index) => selectedKeys.value.splice(index, 1)
+const addButton = () => buttons.value.push('left')
+const removeButton = (index) => buttons.value.splice(index, 1)
+
+// Helper to update active tasks list
+const updateActiveTasks = () => {
+    const tasks = []
+    if (mouseRunMode.value) tasks.push(`鼠标${mouseRunMode.value === 'clicker' ? '连点' : '长按'}运行中`)
+    if (keyboardRunMode.value) tasks.push(`键盘${keyboardRunMode.value === 'clicker' ? '连点' : '长按'}运行中`)
+    activeTasks.value = tasks
+}
+
 const switchAppMode = () => {
-  if (isRunning.value) return
+  // Allow switching even if running, just update UI defaults
   if (appMode.value === 'clicker') {
     appMode.value = 'presser'
     clickType.value = 'hold'
@@ -54,16 +93,37 @@ const switchAppMode = () => {
     appMode.value = 'clicker'
     clickType.value = 'single'
   }
+
+  // Auto-switch device mode if current device is busy in the other appMode
+  // Example: Mouse is running in Clicker mode. User switches to Presser mode.
+  // In Presser mode, Mouse button is disabled. We should auto-switch to Keyboard.
+  if (mode.value === 'mouse' && shouldDisableMouseBtn.value) {
+      mode.value = 'keyboard'
+  } else if (mode.value === 'keyboard' && shouldDisableKeyboardBtn.value) {
+      mode.value = 'mouse'
+  }
 }
 
 const toggleMode = () => {
-  if (isRunning.value) return
+  // Allow switching even if running
   mode.value = mode.value === 'mouse' ? 'keyboard' : 'mouse'
 }
 
+const isCurrentModeRunning = () => {
+    return mode.value === 'mouse' ? !!mouseRunMode.value : !!keyboardRunMode.value
+}
+
 const toggle = async () => {
-  // Check permission before starting
-  if (!isRunning.value) {
+  const currentRunning = isCurrentModeRunning()
+
+  // Check permission before starting new task
+  if (!currentRunning) {
+      // Check if we can start (is button disabled?)
+      // Actually toggle is called by button click or shortcut.
+      // If via shortcut, we must check if we are allowed to start.
+      if (mode.value === 'mouse' && shouldDisableMouseBtn.value) return
+      if (mode.value === 'keyboard' && shouldDisableKeyboardBtn.value) return
+      
       try {
           const allowed = await CheckPermission()
           if (!allowed) {
@@ -77,10 +137,11 @@ const toggle = async () => {
       }
   }
 
-  if (isRunning.value) {
-    await StopClicking()
-    isRunning.value = false
-    message.value = '已停止'
+  if (currentRunning) {
+    await StopClicking(mode.value)
+    if (mode.value === 'mouse') mouseRunMode.value = null
+    else keyboardRunMode.value = null
+    message.value = `${mode.value === 'mouse' ? '鼠标' : '键盘'}任务已停止`
   } else {
     if (interval.value < 1) interval.value = 1
     if (longPressDuration.value < 10) longPressDuration.value = 10
@@ -88,27 +149,69 @@ const toggle = async () => {
     // Ensure clickType matches appMode
     if (appMode.value === 'presser') {
         clickType.value = 'hold'
-    } else {
-        // In clicker mode, it could be single or double, but definitely not long if we want strict separation
-        // However, if user selected double in UI, keep it.
-        // If user somehow has 'long' selected while in clicker mode (e.g. state persistence), force single?
-        // But UI hides 'long' option in clicker mode, so it should be fine.
     }
 
     // Pass mode and key/button to backend
-    // Signature: StartClicking(interval int, mode string, keyBtn string, clickType string, longPressDuration int)
-    const keyBtn = mode.value === 'mouse' ? button.value : key.value
-    await StartClicking(parseInt(interval.value), mode.value, keyBtn, clickType.value, parseInt(longPressDuration.value))
-    isRunning.value = true
-    message.value = '运行中...'
+    // Signature: StartClicking(interval int, mode string, keysOrButtons []string, clickType string, longPressDuration int)
+    let keysToPass = []
+    if (mode.value === 'mouse') {
+        keysToPass = buttons.value
+    } else {
+        keysToPass = selectedKeys.value
+    }
+    
+    await StartClicking(parseInt(interval.value), mode.value, keysToPass, clickType.value, parseInt(longPressDuration.value))
+    
+    if (mode.value === 'mouse') mouseRunMode.value = appMode.value
+    else keyboardRunMode.value = appMode.value
+    
+    message.value = `${mode.value === 'mouse' ? '鼠标' : '键盘'}任务运行中...`
   }
+  updateActiveTasks()
+}
+
+const stopAll = async () => {
+    if (mouseRunMode.value) {
+        await StopClicking('mouse')
+        mouseRunMode.value = null
+    }
+    if (keyboardRunMode.value) {
+        await StopClicking('keyboard')
+        keyboardRunMode.value = null
+    }
+    updateActiveTasks()
+    message.value = "所有任务已停止"
 }
 
 onMounted(async () => {
   try {
     EventsOn("shortcut-pressed", (key) => {
-      if (key === "f8") {
-        toggle()
+      if (key === "f6") {
+          // Switch App Mode (Clicker <-> Presser)
+          switchAppMode()
+      } else if (key === "f7") {
+          // Toggle Mouse Task (Swapped to F7 per request)
+          if (mode.value !== 'mouse') {
+              mode.value = 'mouse'
+          }
+          if (shouldDisableMouseBtn.value) {
+              message.value = "无法启动：鼠标正在运行其他模式的任务"
+              return
+          }
+          toggle()
+      } else if (key === "f8") {
+          // Toggle Keyboard Task (Swapped to F8 per request)
+          if (mode.value !== 'keyboard') {
+              mode.value = 'keyboard'
+          }
+          if (shouldDisableKeyboardBtn.value) {
+              message.value = "无法启动：键盘正在运行其他模式的任务"
+              return
+          }
+          toggle()
+      } else if (key === "f9") {
+          // Stop All Tasks
+          stopAll()
       }
     })
   } catch (e) {
@@ -122,43 +225,64 @@ onMounted(async () => {
   <div class="background" :style="{ backgroundImage: `url(${bgImage})` }"></div>
   <div class="container">
     <div class="header">
-        <button class="switch-btn" @click="switchAppMode" :disabled="isRunning">
+        <button class="switch-btn" @click="switchAppMode" title="快捷键: Ctrl+F6">
             切换到{{ appMode === 'clicker' ? '长按器' : '连点器' }}
         </button>
+    </div>
+    <div class="status-panel" v-if="activeTasks.length > 0">
+        <div v-for="task in activeTasks" :key="task" class="status-item">{{ task }}</div>
     </div>
     <h1>{{ appMode === 'clicker' ? '连点器' : '长按器' }}</h1>
     
     <div class="input-group" v-if="appMode === 'clicker'">
       <label>间隔 (毫秒)</label>
-      <input v-model="interval" type="number" min="1" :disabled="isRunning" />
+      <input v-model="interval" type="number" min="1" :disabled="shouldDisableInputs" />
     </div>
 
     <div class="mode-switch">
-        <button class="mode-btn" :class="{ active: mode === 'mouse' }" @click="toggleMode" :disabled="isRunning">鼠标{{ appMode === 'clicker' ? '连点' : '长按' }}</button>
-        <button class="mode-btn" :class="{ active: mode === 'keyboard' }" @click="toggleMode" :disabled="isRunning">键盘{{ appMode === 'clicker' ? '连点' : '长按' }}</button>
+        <button class="mode-btn" :class="{ active: mode === 'mouse' }" @click="toggleMode" :disabled="shouldDisableMouseBtn">鼠标{{ appMode === 'clicker' ? '连点' : '长按' }}</button>
+        <button class="mode-btn" :class="{ active: mode === 'keyboard' }" @click="toggleMode" :disabled="shouldDisableKeyboardBtn">键盘{{ appMode === 'clicker' ? '连点' : '长按' }}</button>
     </div>
 
     <div v-if="mode === 'mouse'" class="input-group">
-      <label>鼠标按键</label>
-      <select v-model="button" :disabled="isRunning">
-        <option value="left">左键</option>
-        <option value="right">右键</option>
-        <option value="center">中键</option>
-        <option value="side1">侧键 1 (后退)</option>
-        <option value="side2">侧键 2 (前进)</option>
-      </select>
+      <div class="label-row">
+          <label>鼠标按键</label>
+          <button @click="addButton" class="add-btn" title="添加按键" :disabled="shouldDisableInputs">+</button>
+      </div>
+      
+      <div>
+          <div v-for="(btn, index) in buttons" :key="index" class="select-row">
+            <select v-model="buttons[index]" :disabled="shouldDisableInputs">
+                <option value="left">左键</option>
+                <option value="right">右键</option>
+                <option value="center">中键</option>
+                <option value="side1">侧键 1 (后退)</option>
+                <option value="side2">侧键 2 (前进)</option>
+            </select>
+            <button v-if="buttons.length > 1" @click="removeButton(index)" class="remove-btn" :disabled="shouldDisableInputs" title="移除按键">-</button>
+          </div>
+      </div>
     </div>
 
     <div v-else class="input-group">
-      <label>键盘按键</label>
-      <select v-model="key" :disabled="isRunning">
-        <option v-for="k in keys" :key="k.value" :value="k.value">{{ k.label }}</option>
-      </select>
+      <div class="label-row">
+          <label>键盘按键</label>
+          <button @click="addKey" class="add-btn" title="添加按键" :disabled="shouldDisableInputs">+</button>
+      </div>
+      
+      <div>
+          <div v-for="(k, index) in selectedKeys" :key="index" class="select-row">
+            <select v-model="selectedKeys[index]" :disabled="shouldDisableInputs">
+                <option v-for="opt in keys" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+            <button v-if="selectedKeys.length > 1" @click="removeKey(index)" class="remove-btn" :disabled="shouldDisableInputs" title="移除按键">-</button>
+          </div>
+      </div>
     </div>
 
     <div class="input-group" v-if="appMode === 'clicker'">
       <label>点击模式</label>
-      <select v-model="clickType" :disabled="isRunning">
+      <select v-model="clickType" :disabled="shouldDisableInputs">
         <option value="single">单击</option>
         <option value="double">双击</option>
         <option value="long">长按</option>
@@ -167,14 +291,24 @@ onMounted(async () => {
 
     <div class="input-group" v-if="appMode === 'clicker' && clickType === 'long'">
       <label>长按时长 (毫秒)</label>
-      <input v-model.number="longPressDuration" type="number" min="10" :disabled="isRunning" />
+      <input v-model.number="longPressDuration" type="number" min="10" :disabled="shouldDisableInputs" />
     </div>
 
-    <button class="toggle-btn" :class="{ running: isRunning }" @click="toggle">
-      {{ isRunning ? '停止 (Ctrl+F8)' : '启动 (Ctrl+F8)' }}
+    <button class="toggle-btn" :class="{ running: isCurrentModeRunning() }" @click="toggle" :disabled="mode === 'mouse' ? shouldDisableMouseBtn : shouldDisableKeyboardBtn" :title="mode === 'mouse' ? '快捷键: Ctrl+F7' : '快捷键: Ctrl+F8'">
+      {{ isCurrentModeRunning() ? '停止' : '启动' }}
     </button>
 
     <p class="status">{{ message }}</p>
+
+    <div class="help-container">
+      <div class="help-btn">?</div>
+      <div class="tooltip">
+        <div class="tooltip-item"><strong>Ctrl+F6</strong>: 切换模式</div>
+        <div class="tooltip-item"><strong>Ctrl+F7</strong>: 鼠标任务开关</div>
+        <div class="tooltip-item"><strong>Ctrl+F8</strong>: 键盘任务开关</div>
+        <div class="tooltip-item"><strong>Ctrl+F9</strong>: 停止所有任务</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -386,5 +520,169 @@ input[type="number"]:focus, select:focus {
   color: #666;
   font-size: 0.85rem;
   font-weight: 500;
+}
+
+.label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.label-row label {
+  margin-bottom: 0;
+}
+
+.add-btn {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: all 0.2s;
+}
+
+.add-btn:hover {
+  transform: scale(1.1);
+  background: #45a049;
+}
+
+.add-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.select-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.select-row select {
+  flex: 1;
+}
+
+.remove-btn {
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.remove-btn:hover {
+  transform: scale(1.1);
+  background: #d32f2f;
+}
+
+.remove-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  transform: none;
+}
+.status-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  z-index: 10;
+}
+
+.status-item {
+  background: rgba(33, 150, 243, 0.9);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.help-container {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 1000;
+}
+
+.help-btn {
+  width: 24px;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.4);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: help;
+  transition: all 0.2s;
+  backdrop-filter: blur(4px);
+}
+
+.help-btn:hover {
+  background: rgba(33, 150, 243, 0.9);
+  transform: scale(1.1);
+}
+
+.tooltip {
+  position: absolute;
+  bottom: 32px;
+  left: 0;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+  width: max-content;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.help-container:hover .tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.tooltip-item strong {
+  color: #64B5F6;
 }
 </style>

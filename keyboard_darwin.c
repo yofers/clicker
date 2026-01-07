@@ -3,6 +3,9 @@
 
 // Declare the Go function that we will call
 extern void onF8Pressed();
+extern void onF6Pressed();
+extern void onF7Pressed();
+extern void onF9Pressed();
 
 // Event callback function
 CGEventRef eventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
@@ -18,12 +21,22 @@ CGEventRef eventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef eve
     CGKeyCode keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     CGEventFlags flags = CGEventGetFlags(event);
     
-    // F8 keycode is 100, Check if Control key is pressed
+    // F8 keycode is 100, F6 is 97, F7 is 98, F9 is 101
     // kCGEventFlagMaskControl = 0x00040000
-    if (keycode == 100 && (flags & kCGEventFlagMaskControl)) {
-        onF8Pressed();
-        // Consume the event so it doesn't propagate
-        return NULL;
+    if (flags & kCGEventFlagMaskControl) {
+        if (keycode == 100) { // F8
+            onF8Pressed();
+            return NULL;
+        } else if (keycode == 97) { // F6
+            onF6Pressed();
+            return NULL;
+        } else if (keycode == 98) { // F7
+            onF7Pressed();
+            return NULL;
+        } else if (keycode == 101) { // F9
+            onF9Pressed();
+            return NULL;
+        }
     }
 
     return event;

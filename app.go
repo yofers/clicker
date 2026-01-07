@@ -12,10 +12,10 @@ var globalApp *App
 
 // App struct
 type App struct {
-	ctx      context.Context
-	running  bool
-	mu       sync.Mutex
-	stopChan chan struct{}
+	ctx              context.Context
+	mu               sync.Mutex
+	mouseStopChan    chan struct{}
+	keyboardStopChan chan struct{}
 }
 
 // NewApp creates a new App application struct
@@ -32,36 +32,49 @@ func (a *App) startup(ctx context.Context) {
 	startGlobalListener()
 }
 
-func (a *App) triggerShortcut() {
-	runtime.EventsEmit(a.ctx, "shortcut-pressed", "f8")
+func (a *App) triggerShortcut(key string) {
+	runtime.EventsEmit(a.ctx, "shortcut-pressed", key)
 }
 
 // StartClicking starts the auto clicker
-func (a *App) StartClicking(interval int, mode string, keyOrButton string, clickType string, longPressDuration int) {
+func (a *App) StartClicking(interval int, mode string, keysOrButtons []string, clickType string, longPressDuration int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if a.running {
-		return
+	var stopChan chan struct{}
+
+	if mode == "mouse" {
+		if a.mouseStopChan != nil {
+			return // Already running
+		}
+		a.mouseStopChan = make(chan struct{})
+		stopChan = a.mouseStopChan
+	} else {
+		if a.keyboardStopChan != nil {
+			return // Already running
+		}
+		a.keyboardStopChan = make(chan struct{})
+		stopChan = a.keyboardStopChan
 	}
 
-	a.running = true
-	a.stopChan = make(chan struct{})
-
-	// Mouse Button Logic
-	var btnCode int
+	// Parse Mouse Buttons if mode is mouse
+	var btnCodes []int
 	if mode == "mouse" {
-		switch keyOrButton {
-		case "right":
-			btnCode = 1
-		case "center":
-			btnCode = 2
-		case "side1":
-			btnCode = 3
-		case "side2":
-			btnCode = 4
-		default:
-			btnCode = 0
+		for _, k := range keysOrButtons {
+			var code int
+			switch k {
+			case "right":
+				code = 1
+			case "center":
+				code = 2
+			case "side1":
+				code = 3
+			case "side2":
+				code = 4
+			default:
+				code = 0 // left
+			}
+			btnCodes = append(btnCodes, code)
 		}
 	}
 
@@ -73,7 +86,7 @@ func (a *App) StartClicking(interval int, mode string, keyOrButton string, click
 
 		// Check if stopped during sleep
 		select {
-		case <-a.stopChan:
+		case <-stopChan:
 			return
 		default:
 		}
@@ -82,39 +95,57 @@ func (a *App) StartClicking(interval int, mode string, keyOrButton string, click
 
 			// Hold mode: Press Down -> Wait Stop -> Press Up
 			if mode == "mouse" {
-				mouseHold(btnCode, true)
+				for _, code := range btnCodes {
+					mouseHold(code, true)
+				}
 			} else {
-				keyHold(keyOrButton, true)
+				for _, k := range keysOrButtons {
+					keyHold(k, true)
+				}
 			}
 
-			<-a.stopChan
+			<-stopChan
 
 			if mode == "mouse" {
-				mouseHold(btnCode, false)
+				for _, code := range btnCodes {
+					mouseHold(code, false)
+				}
 			} else {
-				keyHold(keyOrButton, false)
+				for _, k := range keysOrButtons {
+					keyHold(k, false)
+				}
 			}
+			// Cleanup channel reference after goroutine finishes?
+			// Ideally StopClicking handles it, but if we need cleanup here:
+			// a.mu.Lock()
+			// if mode == "mouse" { a.mouseStopChan = nil } else { a.keyboardStopChan = nil }
+			// a.mu.Unlock()
+			// But since we close the channel in StopClicking, we should nil it there.
 			return
 		}
 
 		for {
 			// Check stop before action
 			select {
-			case <-a.stopChan:
+			case <-stopChan:
 				return
 			default:
 			}
 
 			// Perform Action
 			if mode == "mouse" {
-				click(btnCode, clickType, longPressDuration)
+				for _, code := range btnCodes {
+					click(code, clickType, longPressDuration)
+				}
 			} else if mode == "keyboard" {
-				pressKey(keyOrButton, clickType, longPressDuration)
+				for _, k := range keysOrButtons {
+					pressKey(k, clickType, longPressDuration)
+				}
 			}
 
 			// Wait Interval
 			select {
-			case <-a.stopChan:
+			case <-stopChan:
 				return
 			case <-time.After(time.Duration(interval) * time.Millisecond):
 			}
@@ -123,17 +154,29 @@ func (a *App) StartClicking(interval int, mode string, keyOrButton string, click
 }
 
 // StopClicking stops the auto clicker
-func (a *App) StopClicking() {
+func (a *App) StopClicking(mode string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if !a.running {
-		return
-	}
-
-	a.running = false
-	if a.stopChan != nil {
-		close(a.stopChan)
+	if mode == "mouse" {
+		if a.mouseStopChan != nil {
+			close(a.mouseStopChan)
+			a.mouseStopChan = nil
+		}
+	} else if mode == "keyboard" {
+		if a.keyboardStopChan != nil {
+			close(a.keyboardStopChan)
+			a.keyboardStopChan = nil
+		}
+	} else if mode == "all" {
+		if a.mouseStopChan != nil {
+			close(a.mouseStopChan)
+			a.mouseStopChan = nil
+		}
+		if a.keyboardStopChan != nil {
+			close(a.keyboardStopChan)
+			a.keyboardStopChan = nil
+		}
 	}
 }
 

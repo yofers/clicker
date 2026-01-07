@@ -5,6 +5,6 @@ export function CheckPermission():Promise<boolean>;
 
 export function Greet(arg1:string):Promise<string>;
 
-export function StartClicking(arg1:number,arg2:string,arg3:string,arg4:string,arg5:number):Promise<void>;
+export function StartClicking(arg1:number,arg2:string,arg3:Array<string>,arg4:string,arg5:number):Promise<void>;
 
-export function StopClicking():Promise<void>;
+export function StopClicking(arg1:string):Promise<void>;

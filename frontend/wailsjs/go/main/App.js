@@ -14,6 +14,6 @@ export function StartClicking(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['StartClicking'](arg1, arg2, arg3, arg4, arg5);
 }
 
-export function StopClicking() {
-  return window['go']['main']['App']['StopClicking']();
+export function StopClicking(arg1) {
+  return window['go']['main']['App']['StopClicking'](arg1);
 }

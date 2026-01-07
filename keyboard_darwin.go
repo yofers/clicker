@@ -23,17 +23,56 @@ func startGlobalListener() {
 
 //export onF8Pressed
 func onF8Pressed() {
-	// Use a goroutine to decouple from the C callback thread
-	// and catch any potential panics
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				println("Recovered from panic in onF8Pressed:", r)
 			}
 		}()
-
 		if globalApp != nil {
-			globalApp.triggerShortcut()
+			globalApp.triggerShortcut("f8")
+		}
+	}()
+}
+
+//export onF6Pressed
+func onF6Pressed() {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				println("Recovered from panic in onF6Pressed:", r)
+			}
+		}()
+		if globalApp != nil {
+			globalApp.triggerShortcut("f6")
+		}
+	}()
+}
+
+//export onF7Pressed
+func onF7Pressed() {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				println("Recovered from panic in onF7Pressed:", r)
+			}
+		}()
+		if globalApp != nil {
+			globalApp.triggerShortcut("f7")
+		}
+	}()
+}
+
+//export onF9Pressed
+func onF9Pressed() {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				println("Recovered from panic in onF9Pressed:", r)
+			}
+		}()
+		if globalApp != nil {
+			globalApp.triggerShortcut("f9")
 		}
 	}()
 }

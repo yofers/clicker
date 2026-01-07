@@ -17,7 +17,10 @@ const (
 	WH_KEYBOARD_LL = 13
 	WM_KEYDOWN     = 0x0100
 	WM_SYSKEYDOWN  = 0x0104
+	VK_F6          = 0x75
+	VK_F7          = 0x76
 	VK_F8          = 0x77
+	VK_F9          = 0x78
 	VK_CONTROL     = 0x11
 )
 
@@ -35,13 +38,26 @@ func startGlobalListener() {
 		if nCode >= 0 {
 			if wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN {
 				kbd := (*KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
-				if kbd.VkCode == VK_F8 {
-					// Check if Control key is pressed
-					// GetAsyncKeyState returns a short, high bit set means key is down
-					ret, _, _ := procGetAsyncKeyState.Call(uintptr(VK_CONTROL))
-					if ret&0x8000 != 0 {
+
+				// Check Control key first
+				ret, _, _ := procGetAsyncKeyState.Call(uintptr(VK_CONTROL))
+				isCtrlDown := ret&0x8000 != 0
+
+				if isCtrlDown {
+					var key string
+					if kbd.VkCode == VK_F8 {
+						key = "f8"
+					} else if kbd.VkCode == VK_F7 {
+						key = "f7"
+					} else if kbd.VkCode == VK_F6 {
+						key = "f6"
+					} else if kbd.VkCode == VK_F9 {
+						key = "f9"
+					}
+
+					if key != "" {
 						if globalApp != nil {
-							globalApp.triggerShortcut()
+							globalApp.triggerShortcut(key)
 						}
 						// Consume event
 						return 1
