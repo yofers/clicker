@@ -1,5 +1,6 @@
 # Wails
 build/bin/
+build/release/
 frontend/dist/
 frontend/node_modules/
 
