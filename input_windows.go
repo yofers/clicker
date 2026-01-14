@@ -16,6 +16,7 @@ var (
 )
 
 const (
+	MOUSEEVENTF_MOVE       = 0x0001
 	MOUSEEVENTF_LEFTDOWN   = 0x0002
 	MOUSEEVENTF_LEFTUP     = 0x0004
 	MOUSEEVENTF_RIGHTDOWN  = 0x0008
@@ -24,6 +25,7 @@ const (
 	MOUSEEVENTF_MIDDLEUP   = 0x0040
 	MOUSEEVENTF_XDOWN      = 0x0080
 	MOUSEEVENTF_XUP        = 0x0100
+	MOUSEEVENTF_ABSOLUTE   = 0x8000
 
 	XBUTTON1 = 0x0001
 	XBUTTON2 = 0x0002
@@ -46,6 +48,7 @@ var winKeyMap = map[string]byte{
 	"H": 0x48, "I": 0x49, "J": 0x4A, "K": 0x4B, "L": 0x4C, "M": 0x4D, "N": 0x4E,
 	"O": 0x4F, "P": 0x50, "Q": 0x51, "R": 0x52, "S": 0x53, "T": 0x54, "U": 0x55,
 	"V": 0x56, "W": 0x57, "X": 0x58, "Y": 0x59, "Z": 0x5A,
+	"Shift": 0x10, "Ctrl": 0x11, "Alt": 0x12, "CapsLock": 0x14, "Win": 0x5B,
 }
 
 func CheckAccessibility() bool {
@@ -176,5 +179,79 @@ func keyHold(key string, start bool) {
 		} else {
 			procKeybdEvent.Call(uintptr(vk), 0, KEYEVENTF_KEYUP, 0)
 		}
+	}
+}
+
+// Recorder Wrappers
+
+func moveMouse(x, y int) {
+	procSetCursorPos.Call(uintptr(x), uintptr(y))
+}
+
+func mouseToggle(btn string, down bool) {
+	var flag uint32
+	var data uint32
+
+	switch btn {
+	case "left":
+		if down {
+			flag = MOUSEEVENTF_LEFTDOWN
+		} else {
+			flag = MOUSEEVENTF_LEFTUP
+		}
+	case "right":
+		if down {
+			flag = MOUSEEVENTF_RIGHTDOWN
+		} else {
+			flag = MOUSEEVENTF_RIGHTUP
+		}
+	case "center":
+		if down {
+			flag = MOUSEEVENTF_MIDDLEDOWN
+		} else {
+			flag = MOUSEEVENTF_MIDDLEUP
+		}
+	case "side1":
+		if down {
+			flag = MOUSEEVENTF_XDOWN
+		} else {
+			flag = MOUSEEVENTF_XUP
+		}
+		data = XBUTTON1
+	case "side2":
+		if down {
+			flag = MOUSEEVENTF_XDOWN
+		} else {
+			flag = MOUSEEVENTF_XUP
+		}
+		data = XBUTTON2
+	default:
+		if down {
+			flag = MOUSEEVENTF_LEFTDOWN
+		} else {
+			flag = MOUSEEVENTF_LEFTUP
+		}
+	}
+
+	procMouseEvent.Call(uintptr(flag), 0, 0, uintptr(data), 0)
+}
+
+func keyToggle(key string, down bool) {
+	var vk byte
+	if val, ok := winKeyMap[key]; ok {
+		vk = val
+	} else {
+		if len(key) == 1 {
+			ret, _, _ := procVkKeyScan.Call(uintptr(key[0]))
+			vk = byte(ret)
+		}
+	}
+
+	if vk != 0 {
+		var flag uintptr
+		if !down {
+			flag = KEYEVENTF_KEYUP
+		}
+		procKeybdEvent.Call(uintptr(vk), 0, flag, 0)
 	}
 }

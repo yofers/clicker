@@ -6,14 +6,46 @@ export function CheckPermission() {
   return window['go']['main']['App']['CheckPermission']();
 }
 
+export function ConfirmDelete(arg1) {
+  return window['go']['main']['App']['ConfirmDelete'](arg1);
+}
+
+export function DeleteRecording(arg1) {
+  return window['go']['main']['App']['DeleteRecording'](arg1);
+}
+
+export function GetRecordings() {
+  return window['go']['main']['App']['GetRecordings']();
+}
+
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
+}
+
+export function PlayRecording(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PlayRecording'](arg1, arg2, arg3);
+}
+
+export function SelectRecordingFile() {
+  return window['go']['main']['App']['SelectRecordingFile']();
 }
 
 export function StartClicking(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['StartClicking'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function StartRecording(arg1) {
+  return window['go']['main']['App']['StartRecording'](arg1);
+}
+
 export function StopClicking(arg1) {
   return window['go']['main']['App']['StopClicking'](arg1);
+}
+
+export function StopPlayback() {
+  return window['go']['main']['App']['StopPlayback']();
+}
+
+export function StopRecording() {
+  return window['go']['main']['App']['StopRecording']();
 }

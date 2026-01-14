@@ -10,6 +10,7 @@ import (
 
 var globalApp *App
 
+
 // App struct
 type App struct {
 	ctx              context.Context

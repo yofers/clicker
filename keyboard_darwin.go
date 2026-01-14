@@ -76,3 +76,94 @@ func onF9Pressed() {
 		}
 	}()
 }
+
+//export onF10Pressed
+func onF10Pressed() {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				println("Recovered from panic in onF10Pressed:", r)
+			}
+		}()
+		if globalApp != nil {
+			globalApp.triggerShortcut("f10")
+		}
+	}()
+}
+
+//export isRecording
+func isRecording() int {
+	globalRecorder.mu.Lock()
+	defer globalRecorder.mu.Unlock()
+	if globalRecorder.isRecording {
+		return 1
+	}
+	return 0
+}
+
+// Reverse mapping for key codes
+var macKeyCodeMap map[int]string
+
+func init() {
+	macKeyCodeMap = make(map[int]string)
+	for k, v := range macKeyMap {
+		macKeyCodeMap[v] = k
+	}
+}
+
+//export onRecordInput
+func onRecordInput(eventType int, x, y int, button int, keyCode int) {
+	// eventType: 0=Move, 1=Down, 2=Up, 3=KeyDown, 4=KeyUp
+	
+	// Fast check again (though C side should have checked)
+	// We do this asynchronously to not block the C callback too much?
+	// Actually C callback blocks the event tap. We should be fast.
+	// But RecordEvent takes a lock.
+	
+	action := Action{
+		X: x, 
+		Y: y,
+	}
+
+	switch eventType {
+	case 0: // Move
+		action.Type = ActionMouseMove
+	case 1: // Down
+		action.Type = ActionMouseDown
+		switch button {
+		case 0: action.Button = "left"
+		case 1: action.Button = "right"
+		case 2: action.Button = "center"
+		case 3: action.Button = "side1"
+		case 4: action.Button = "side2"
+		default: action.Button = "unknown"
+		}
+	case 2: // Up
+		action.Type = ActionMouseUp
+		switch button {
+		case 0: action.Button = "left"
+		case 1: action.Button = "right"
+		case 2: action.Button = "center"
+		case 3: action.Button = "side1"
+		case 4: action.Button = "side2"
+		default: action.Button = "unknown"
+		}
+	case 3: // KeyDown
+		action.Type = ActionKeyDown
+		if name, ok := macKeyCodeMap[keyCode]; ok {
+			action.Key = name
+		} else {
+			// Unknown key, maybe ignore or record code?
+			return 
+		}
+	case 4: // KeyUp
+		action.Type = ActionKeyUp
+		if name, ok := macKeyCodeMap[keyCode]; ok {
+			action.Key = name
+		} else {
+			return
+		}
+	}
+
+	RecordEvent(action)
+}

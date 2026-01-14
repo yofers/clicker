@@ -3,8 +3,24 @@
 
 export function CheckPermission():Promise<boolean>;
 
+export function ConfirmDelete(arg1:string):Promise<boolean>;
+
+export function DeleteRecording(arg1:string):Promise<void>;
+
+export function GetRecordings():Promise<Array<string>>;
+
 export function Greet(arg1:string):Promise<string>;
+
+export function PlayRecording(arg1:string,arg2:number,arg3:number):Promise<void>;
+
+export function SelectRecordingFile():Promise<string>;
 
 export function StartClicking(arg1:number,arg2:string,arg3:Array<string>,arg4:string,arg5:number):Promise<void>;
 
+export function StartRecording(arg1:string):Promise<void>;
+
 export function StopClicking(arg1:string):Promise<void>;
+
+export function StopPlayback():Promise<void>;
+
+export function StopRecording():Promise<string>;

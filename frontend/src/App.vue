@@ -1,6 +1,6 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { StartClicking, StopClicking, CheckPermission } from '../wailsjs/go/main/App'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { StartClicking, StopClicking, CheckPermission, StartRecording, StopRecording, GetRecordings, PlayRecording, StopPlayback, SelectRecordingFile, DeleteRecording, ConfirmDelete } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
 import bgImage from './assets/backgrounds/background.jpg'
@@ -18,6 +18,23 @@ const selectedKeys = ref(['Space'])
 const clickType = ref('single')
 const longPressDuration = ref(1000)
 const message = ref('')
+
+// Recorder State
+const recordings = ref([])
+const isRecording = ref(false)
+const isPlaying = ref(false)
+const playLoopInterval = ref(1000)
+const playLoopCount = ref(0) // 0 = infinite
+const currentPlayingFile = ref('')
+const recorderMode = ref('record') // 'record' or 'execute'
+const selectedFile = ref('')
+const recordingFilename = ref('')
+const recordingFeedback = ref('')
+const playbackFeedback = ref('')
+
+const formatFileName = (name) => {
+    return name ? name.replace(/\.yfc$/, '') : ''
+}
 
 const keys = [
   { value: 'Space', label: 'Space (空格)' },
@@ -48,6 +65,8 @@ const keys = [
   { value: '6', label: '6' }, { value: '7', label: '7' }, { value: '8', label: '8' },
   { value: '9', label: '9' }
 ]
+
+const isDropdownOpen = ref(false)
 
 // Computed states for UI locking
 const isMouseBusy = computed(() => !!mouseRunMode.value)
@@ -81,26 +100,36 @@ const updateActiveTasks = () => {
     const tasks = []
     if (mouseRunMode.value) tasks.push(`鼠标${mouseRunMode.value === 'clicker' ? '连点' : '长按'}运行中`)
     if (keyboardRunMode.value) tasks.push(`键盘${keyboardRunMode.value === 'clicker' ? '连点' : '长按'}运行中`)
+    if (isPlaying.value) tasks.push(`动作回放运行中`)
+    if (isRecording.value) tasks.push(`正在录制动作`)
     activeTasks.value = tasks
 }
 
 const switchAppMode = () => {
+  if (isRecording.value) {
+      message.value = "录制中无法切换模式"
+      return
+  }
   // Allow switching even if running, just update UI defaults
   if (appMode.value === 'clicker') {
     appMode.value = 'presser'
     clickType.value = 'hold'
+  } else if (appMode.value === 'presser') {
+    appMode.value = 'recorder'
+    loadRecordings()
   } else {
     appMode.value = 'clicker'
     clickType.value = 'single'
   }
 
   // Auto-switch device mode if current device is busy in the other appMode
-  // Example: Mouse is running in Clicker mode. User switches to Presser mode.
-  // In Presser mode, Mouse button is disabled. We should auto-switch to Keyboard.
-  if (mode.value === 'mouse' && shouldDisableMouseBtn.value) {
-      mode.value = 'keyboard'
-  } else if (mode.value === 'keyboard' && shouldDisableKeyboardBtn.value) {
-      mode.value = 'mouse'
+  // Only relevant for Clicker/Presser modes
+  if (appMode.value !== 'recorder') {
+      if (mode.value === 'mouse' && shouldDisableMouseBtn.value) {
+          mode.value = 'keyboard'
+      } else if (mode.value === 'keyboard' && shouldDisableKeyboardBtn.value) {
+          mode.value = 'mouse'
+      }
   }
 }
 
@@ -170,6 +199,117 @@ const toggle = async () => {
   updateActiveTasks()
 }
 
+// Recorder Functions
+const loadRecordings = async () => {
+    try {
+        const list = await GetRecordings()
+        recordings.value = list || []
+        // Select newest by default if not selected
+        if (recordings.value.length > 0) {
+             selectedFile.value = recordings.value[0]
+        }
+    } catch (e) {
+        console.error("Failed to load recordings", e)
+    }
+}
+
+const toggleRecording = async () => {
+    if (isRecording.value) {
+        try {
+            const filename = await StopRecording()
+            isRecording.value = false
+            message.value = `录制完成: ${filename}`
+            // Auto switch to execute mode
+            await loadRecordings()
+            recorderMode.value = 'execute'
+            selectedFile.value = filename
+            updateActiveTasks()
+        } catch (e) {
+            message.value = `停止录制失败: ${e}`
+        }
+    } else {
+        // Check permissions first
+        try {
+            const allowed = await CheckPermission()
+            if (!allowed) {
+                 alert("请在系统设置 -> 隐私与安全性 -> 辅助功能中授予本应用权限，然后重试。")
+                 return
+            }
+            console.log("DEBUG: Calling StartRecording with:", recordingFilename.value)
+            await StartRecording(recordingFilename.value)
+            isRecording.value = true
+            message.value = "正在录制..."
+            updateActiveTasks()
+        } catch (e) {
+             message.value = `启动录制失败: ${e}`
+        }
+    }
+}
+
+const playRec = async () => {
+    if (isPlaying.value) {
+        // Stop playback
+        await stopPlay()
+        return
+    }
+
+    if (!selectedFile.value) {
+        message.value = "请先选择录制文件"
+        return
+    }
+
+    try {
+        currentPlayingFile.value = selectedFile.value
+        isPlaying.value = true
+        message.value = `正在回放: ${selectedFile.value}`
+        updateActiveTasks()
+        await PlayRecording(selectedFile.value, parseInt(playLoopInterval.value), parseInt(playLoopCount.value))
+    } catch (e) {
+        isPlaying.value = false
+        currentPlayingFile.value = ''
+        message.value = `回放失败: ${e}`
+        updateActiveTasks()
+    }
+}
+
+const stopPlay = async () => {
+    try {
+        await StopPlayback()
+        isPlaying.value = false
+        currentPlayingFile.value = ''
+        message.value = "回放已停止"
+        playbackFeedback.value = '' // Clear feedback immediately
+        updateActiveTasks()
+    } catch (e) {
+        message.value = `停止回放失败: ${e}`
+    }
+}
+
+const selectFile = async () => {
+    if (isPlaying.value) return
+    try {
+        const file = await SelectRecordingFile()
+        if (file) {
+            // Reload list to include the newly imported file
+            await loadRecordings()
+            selectedFile.value = file
+        }
+    } catch (e) {
+        console.error("Failed to select file", e)
+    }
+}
+
+const setRecorderMode = (mode) => {
+    if (isRecording.value) {
+        message.value = "录制中无法切换页面"
+        return
+    }
+    recorderMode.value = mode
+    if (mode === 'execute') {
+        loadRecordings()
+    }
+}
+
 const stopAll = async () => {
     if (mouseRunMode.value) {
         await StopClicking('mouse')
@@ -179,44 +319,144 @@ const stopAll = async () => {
         await StopClicking('keyboard')
         keyboardRunMode.value = null
     }
+    
+    // Stop Playback if running
+    if (isPlaying.value) {
+        await stopPlay()
+    }
+    // Stop Recording if running
+    if (isRecording.value) {
+        await toggleRecording()
+    }
+
     updateActiveTasks()
     message.value = "所有任务已停止"
 }
 
+const toggleDropdown = () => {
+  if (isPlaying.value) return
+  isDropdownOpen.value = !isDropdownOpen.value
+}
+
+const selectRecording = (file) => {
+  selectedFile.value = file
+  isDropdownOpen.value = false
+}
+
+const removeRecording = async (file) => {
+  message.value = `正在处理删除请求: ${file}`
+  try {
+    const confirmed = await ConfirmDelete(file)
+    if (!confirmed) {
+        message.value = "已取消删除"
+        return
+    }
+
+    await DeleteRecording(file)
+    await loadRecordings()
+    // If we deleted the currently selected file, clear selection or select first
+    if (selectedFile.value === file) {
+      selectedFile.value = recordings.value.length > 0 ? recordings.value[0] : ''
+    }
+    message.value = `已删除文件: ${file}`
+  } catch (e) {
+    message.value = `删除失败: ${e}`
+  }
+}
+
+const closeDropdown = (e) => {
+    if (!e.target.closest('.custom-select-container')) {
+        isDropdownOpen.value = false
+    }
+}
+
 onMounted(async () => {
+    document.addEventListener('click', closeDropdown)
   try {
     EventsOn("shortcut-pressed", (key) => {
       if (key === "f6") {
           // Switch App Mode (Clicker <-> Presser)
           switchAppMode()
       } else if (key === "f7") {
-          // Toggle Mouse Task (Swapped to F7 per request)
-          if (mode.value !== 'mouse') {
-              mode.value = 'mouse'
+          // Ctrl+F7: Toggle Mouse Action (Clicker/Presser) or Recording (Recorder)
+          if (appMode.value === 'recorder') {
+              if (recorderMode.value !== 'record') {
+                  setRecorderMode('record')
+              }
+              toggleRecording()
+          } else {
+              // Clicker or Presser mode - Toggle Mouse
+              if (mode.value !== 'mouse') {
+                  // Only switch mode if we want to visualize it, 
+                  // but requirements say "Ctrl+F7 starts mouse clicker", implies specific device toggle
+                  // Let's switch UI to mouse for feedback, then toggle
+                  mode.value = 'mouse'
+              }
+              // If already running keyboard, we might need to stop it or allow parallel?
+              // Current logic: toggle() starts whatever is in mode.value
+              // But we want specific F7 -> Mouse, F8 -> Keyboard
+              
+              // We need to ensure mode is set to mouse, then call toggle if not running, or stop if running mouse
+              if (mouseRunMode.value) {
+                  // Mouse is running, stop it
+                  // We need to set mode to mouse to call toggle() correctly or call StopClicking directly
+                  mode.value = 'mouse' // Sync UI
+                  toggle() 
+              } else {
+                  // Mouse not running. 
+                  // If Keyboard is running, can we run both? 
+                  // The backend supports separate StartClicking calls for mouse/keyboard if we implemented it right.
+                  // StartClicking takes "mode" arg.
+                  // Let's assume we can run parallel.
+                  mode.value = 'mouse'
+                  toggle()
+              }
           }
-          if (shouldDisableMouseBtn.value) {
-              message.value = "无法启动：鼠标正在运行其他模式的任务"
-              return
-          }
-          toggle()
       } else if (key === "f8") {
-          // Toggle Keyboard Task (Swapped to F8 per request)
-          if (mode.value !== 'keyboard') {
-              mode.value = 'keyboard'
+          // Ctrl+F8: Toggle Keyboard Action (Clicker/Presser) or Playback (Recorder)
+          if (appMode.value === 'recorder') {
+              if (isRecording.value) {
+                  message.value = "录制中无法执行动作"
+                  return
+              }
+              if (recorderMode.value !== 'execute') {
+                  setRecorderMode('execute')
+              }
+              playRec()
+          } else {
+              // Clicker or Presser mode - Toggle Keyboard
+              if (mode.value !== 'keyboard') {
+                  mode.value = 'keyboard'
+              }
+              
+              if (keyboardRunMode.value) {
+                  mode.value = 'keyboard'
+                  toggle()
+              } else {
+                  mode.value = 'keyboard'
+                  toggle()
+              }
           }
-          if (shouldDisableKeyboardBtn.value) {
-              message.value = "无法启动：键盘正在运行其他模式的任务"
-              return
-          }
-          toggle()
       } else if (key === "f9") {
-          // Stop All Tasks
+          // Ctrl+F9: Stop All
           stopAll()
       }
+    })
+    
+    EventsOn("recording-feedback", (msg) => {
+        recordingFeedback.value = msg
+    })
+
+    EventsOn("playback-feedback", (msg) => {
+        playbackFeedback.value = msg
     })
   } catch (e) {
     console.error("Wails runtime not ready", e)
   }
+})
+
+onUnmounted(() => {
+    document.removeEventListener('click', closeDropdown)
 })
 
 </script>
@@ -225,15 +465,90 @@ onMounted(async () => {
   <div class="background" :style="{ backgroundImage: `url(${bgImage})` }"></div>
   <div class="container">
     <div class="header">
-        <button class="switch-btn" @click="switchAppMode" title="快捷键: Ctrl+F6">
-            切换到{{ appMode === 'clicker' ? '长按器' : '连点器' }}
+        <button class="switch-btn" @click="switchAppMode" title="快捷键: Ctrl+F6" :disabled="isRecording">
+            切换到{{ appMode === 'clicker' ? '长按器' : (appMode === 'presser' ? '录制器' : '连点器') }}
         </button>
     </div>
     <div class="status-panel" v-if="activeTasks.length > 0">
         <div v-for="task in activeTasks" :key="task" class="status-item">{{ task }}</div>
     </div>
-    <h1>{{ appMode === 'clicker' ? '连点器' : '长按器' }}</h1>
+    <h1>{{ appMode === 'clicker' ? '连点器' : (appMode === 'presser' ? '长按器' : '录制器') }}</h1>
     
+    <!-- Recorder UI -->
+    <div v-if="appMode === 'recorder'" class="recorder-container">
+        
+        <!-- Mode Switcher -->
+        <div class="mode-switch">
+            <button class="mode-btn" :class="{ active: recorderMode === 'record' }" @click="setRecorderMode('record')" :disabled="isRecording || isPlaying">动作录制</button>
+            <button class="mode-btn" :class="{ active: recorderMode === 'execute' }" @click="setRecorderMode('execute')" :disabled="isRecording || isPlaying">执行动作</button>
+        </div>
+
+        <!-- Record Mode Content -->
+        <div v-if="recorderMode === 'record'" class="input-group">
+            <div class="input-group" style="margin-bottom: 0.8rem;">
+                <label>保存文件名 (可选)</label>
+                <input v-model="recordingFilename" type="text" placeholder="留空则自动生成 (recording_日期.yfc)" :disabled="isRecording" style="width: 100%; padding: 0.7rem 0.8rem; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 12px; font-size: 0.9rem; box-sizing: border-box; background-color: rgba(255, 255, 255, 0.8);" />
+            </div>
+            <button class="toggle-btn" :class="{ running: isRecording }" @click="toggleRecording" :disabled="isPlaying">
+                {{ isRecording ? '结束录制' : '开始录制' }}
+            </button>
+            <div style="margin-top: 10px; font-size: 0.85rem; color: #666; text-align: center;">
+                点击开始录制后，将记录所有的鼠标和键盘操作。
+            </div>
+            <div v-if="isRecording" class="feedback-panel" style="margin-top: 15px; text-align: center; color: #2196F3; font-weight: bold; min-height: 20px;">
+                {{ recordingFeedback }}
+            </div>
+        </div>
+
+        <!-- Execute Mode Content -->
+        <div v-if="recorderMode === 'execute'" class="execute-panel">
+             <div class="input-group">
+                <label>选择动作文件</label>
+                <div class="joined-input-row">
+                    <div class="custom-select-container" :class="{ disabled: isPlaying }">
+                        <div class="custom-select-trigger" @click="toggleDropdown">
+                            <span>{{ selectedFile ? formatFileName(selectedFile) : (recordings.length === 0 ? '无录制文件' : '请选择文件') }}</span>
+                            <span class="arrow">▼</span>
+                        </div>
+                        <div class="custom-options" v-if="isDropdownOpen">
+                            <div v-for="file in recordings" :key="file" class="custom-option" :class="{ selected: file === selectedFile }" @click="selectRecording(file)">
+                                <span class="option-text">{{ formatFileName(file) }}</span>
+                                <span class="delete-icon" @click.stop="removeRecording(file)" title="删除文件">✕</span>
+                            </div>
+                            <div v-if="recordings.length === 0" class="custom-option disabled">无录制文件</div>
+                        </div>
+                    </div>
+                    <button @click="selectFile" class="browse-btn" :disabled="isPlaying" title="导入文件">
+                        导入文件
+                    </button>
+                </div>
+             </div>
+
+             <!-- Playback Settings -->
+             <div style="margin-bottom: 15px;">
+                 <div class="input-group">
+                      <label>回放间隔(毫秒)</label>
+                      <input v-model.number="playLoopInterval" type="number" min="0" :disabled="isPlaying || isRecording" />
+                 </div>
+                 <div class="input-group">
+                      <label>循环次数 (0 = 无限)</label>
+                      <input v-model.number="playLoopCount" type="number" min="0" :disabled="isPlaying || isRecording" />
+                 </div>
+             </div>
+
+             <button class="toggle-btn" :class="{ running: isPlaying }" @click="playRec" :disabled="!selectedFile">
+                {{ isPlaying ? '停止回放' : '启动(Ctrl+F8)' }}
+             </button>
+             
+             <div v-if="isPlaying" style="margin-top: 10px; text-align: center; color: #2196F3; font-weight: bold;">
+                 <div>正在运行: {{ currentPlayingFile }}</div>
+                 <div style="margin-top: 5px;">{{ playbackFeedback }}</div>
+             </div>
+        </div>
+    </div>
+
+    <!-- Clicker/Presser UI -->
+    <template v-else>
     <div class="input-group" v-if="appMode === 'clicker'">
       <label>间隔 (毫秒)</label>
       <input v-model="interval" type="number" min="1" :disabled="shouldDisableInputs" />
@@ -297,6 +612,7 @@ onMounted(async () => {
     <button class="toggle-btn" :class="{ running: isCurrentModeRunning() }" @click="toggle" :disabled="mode === 'mouse' ? shouldDisableMouseBtn : shouldDisableKeyboardBtn" :title="mode === 'mouse' ? '快捷键: Ctrl+F7' : '快捷键: Ctrl+F8'">
       {{ isCurrentModeRunning() ? '停止' : '启动' }}
     </button>
+    </template>
 
     <p class="status">{{ message }}</p>
 
@@ -304,8 +620,10 @@ onMounted(async () => {
       <div class="help-btn">?</div>
       <div class="tooltip">
         <div class="tooltip-item"><strong>Ctrl+F6</strong>: 切换模式</div>
-        <div class="tooltip-item"><strong>Ctrl+F7</strong>: 鼠标任务开关</div>
-        <div class="tooltip-item"><strong>Ctrl+F8</strong>: 键盘任务开关</div>
+        <div class="tooltip-item" v-if="appMode === 'recorder'"><strong>Ctrl+F7</strong>: 录制动作开关</div>
+        <div class="tooltip-item" v-else><strong>Ctrl+F7</strong>: 鼠标任务开关</div>
+        <div class="tooltip-item" v-if="appMode === 'recorder'"><strong>Ctrl+F8</strong>: 执行动作开关</div>
+        <div class="tooltip-item" v-else><strong>Ctrl+F8</strong>: 键盘任务开关</div>
         <div class="tooltip-item"><strong>Ctrl+F9</strong>: 停止所有任务</div>
       </div>
     </div>
@@ -684,5 +1002,176 @@ input[type="number"]:focus, select:focus {
 
 .tooltip-item strong {
   color: #64B5F6;
+}
+
+/* Recorder Styles */
+.recorder-container {
+  text-align: left;
+}
+
+.browse-btn {
+  background: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 80px;
+}
+
+.browse-btn:hover {
+  background: #1976D2;
+  transform: scale(1.05);
+}
+
+.browse-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.no-data {
+  text-align: center;
+  color: #999;
+  padding: 20px;
+  font-style: italic;
+}
+
+/* Merged Input Row */
+.joined-input-row {
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 8px; /* Match select-row margin */
+  width: 100%;
+}
+
+.joined-input-row select {
+  flex: 1;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+  z-index: 1;
+  margin: 0; /* Ensure no margins */
+}
+
+.joined-input-row .browse-btn {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.2); /* Add subtle separator */
+}
+
+/* Custom Dropdown Styles */
+.custom-select-container {
+  position: relative;
+  flex: 1;
+  min-width: 0; /* Critical: allows flex item to shrink below content size */
+}
+
+.custom-select-container.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.custom-select-trigger {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 1rem;
+  color: #333;
+  /* Match input/select styling in joined-row */
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.custom-select-trigger span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 8px;
+  flex: 1;
+  min-width: 0; /* Critical for nested flex overflow */
+}
+
+.custom-select-trigger .arrow {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.custom-options {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  margin-top: 4px;
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.custom-option {
+  padding: 0.7rem 0.8rem;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.2s;
+}
+
+.custom-option:hover {
+  background-color: #f5f5f5;
+}
+
+.custom-option.selected {
+  background-color: #e3f2fd;
+  color: #1976D2;
+  font-weight: 500;
+}
+
+.custom-option.disabled {
+  color: #999;
+  cursor: default;
+  justify-content: center;
+}
+
+.custom-option .option-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 8px;
+}
+
+.delete-icon {
+  color: #999;
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  position: relative;
+  z-index: 10;
+}
+
+.delete-icon:hover {
+  color: #f44336;
+  background-color: rgba(244, 67, 54, 0.1);
 }
 </style>

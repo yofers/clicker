@@ -20,6 +20,15 @@ void cgoMouseLocation(int *x, int *y) {
     CFRelease(event);
 }
 
+void cgoMouseMove(int x, int y) {
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    CGPoint point = CGPointMake(x, y);
+    CGEventRef event = CGEventCreateMouseEvent(source, kCGEventMouseMoved, point, 0);
+    CGEventPost(kCGHIDEventTap, event);
+    CFRelease(event);
+    CFRelease(source);
+}
+
 void cgoMouseDown(int x, int y, int button) {
     CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
     CGEventType down;
@@ -114,6 +123,7 @@ void cgoKeyUp(int keyCode) {
 
 bool checkAccessibility();
 void cgoMouseLocation(int *x, int *y);
+void cgoMouseMove(int x, int y);
 void cgoMouseDown(int x, int y, int button);
 void cgoMouseUp(int x, int y, int button);
 void cgoKeyDown(int keyCode);
@@ -137,26 +147,29 @@ var macKeyMap = map[string]int{
 	"F9": 101, "F10": 109, "F11": 103, "F12": 111,
 	"Left": 123, "Right": 124, "Down": 125, "Up": 126,
 	"Backspace": 51,
+	"Shift":     56, "Ctrl": 59, "Alt": 58, "Command": 55, "CapsLock": 57, "Fn": 63,
 }
 
 func click(btnCode int, clickType string, duration int) {
 	var x, y C.int
 	C.cgoMouseLocation(&x, &y)
 
+	doClick := func() {
+		C.cgoMouseDown(x, y, C.int(btnCode))
+		C.cgoMouseUp(x, y, C.int(btnCode))
+	}
+
 	switch clickType {
 	case "double":
-		C.cgoMouseDown(x, y, C.int(btnCode))
-		C.cgoMouseUp(x, y, C.int(btnCode))
+		doClick()
 		time.Sleep(50 * time.Millisecond)
-		C.cgoMouseDown(x, y, C.int(btnCode))
-		C.cgoMouseUp(x, y, C.int(btnCode))
+		doClick()
 	case "long":
 		C.cgoMouseDown(x, y, C.int(btnCode))
 		time.Sleep(time.Duration(duration) * time.Millisecond)
 		C.cgoMouseUp(x, y, C.int(btnCode))
 	default: // single
-		C.cgoMouseDown(x, y, C.int(btnCode))
-		C.cgoMouseUp(x, y, C.int(btnCode))
+		doClick()
 	}
 }
 
@@ -193,6 +206,49 @@ func pressKey(key string, clickType string, duration int) {
 func keyHold(key string, start bool) {
 	if code, ok := macKeyMap[key]; ok {
 		if start {
+			C.cgoKeyDown(C.int(code))
+		} else {
+			C.cgoKeyUp(C.int(code))
+		}
+	}
+}
+
+// Recorder Wrappers
+
+func moveMouse(x, y int) {
+	C.cgoMouseMove(C.int(x), C.int(y))
+}
+
+func mouseToggle(btn string, down bool) {
+	var code int
+	switch btn {
+	case "left":
+		code = 0
+	case "right":
+		code = 1
+	case "center":
+		code = 2
+	case "side1":
+		code = 3
+	case "side2":
+		code = 4
+	default:
+		code = 0
+	}
+
+	var x, y C.int
+	C.cgoMouseLocation(&x, &y)
+
+	if down {
+		C.cgoMouseDown(x, y, C.int(code))
+	} else {
+		C.cgoMouseUp(x, y, C.int(code))
+	}
+}
+
+func keyToggle(key string, down bool) {
+	if code, ok := macKeyMap[key]; ok {
+		if down {
 			C.cgoKeyDown(C.int(code))
 		} else {
 			C.cgoKeyUp(C.int(code))
