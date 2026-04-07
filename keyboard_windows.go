@@ -1,9 +1,12 @@
 package main
 
 import (
+	"sync"
 	"syscall"
 	"unsafe"
 )
+
+var windowsListenerOnce sync.Once
 
 var (
 	moduser32            = syscall.NewLazyDLL("user32.dll")
@@ -28,13 +31,15 @@ const (
 	WM_RBUTTONUP   = 0x0205
 	WM_MBUTTONDOWN = 0x0207
 	WM_MBUTTONUP   = 0x0208
+	WM_MOUSEWHEEL  = 0x020A
+	WM_MOUSEHWHEEL = 0x020E
 
-	VK_F6          = 0x75
-	VK_F7          = 0x76
-	VK_F8          = 0x77
-	VK_F9          = 0x78
-	VK_F10         = 0x79
-	VK_CONTROL     = 0x11
+	VK_F6      = 0x75
+	VK_F7      = 0x76
+	VK_F8      = 0x77
+	VK_F9      = 0x78
+	VK_F10     = 0x79
+	VK_CONTROL = 0x11
 )
 
 type KBDLLHOOKSTRUCT struct {
@@ -70,151 +75,159 @@ var winKeyCodeMap = map[uint32]string{
 }
 
 func startGlobalListener() {
-	// KEYBOARD HOOK
-	keyboardCallback := syscall.NewCallback(func(nCode int, wParam uintptr, lParam uintptr) uintptr {
-		if nCode >= 0 {
-			kbd := (*KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
-			
-			// 1. Handle Shortcuts (Ctrl+Fx) - Only on KeyDown
-			if wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN {
-				ret, _, _ := procGetAsyncKeyState.Call(uintptr(VK_CONTROL))
-				isCtrlDown := ret&0x8000 != 0
+	windowsListenerOnce.Do(func() {
+		// KEYBOARD HOOK
+		keyboardCallback := syscall.NewCallback(func(nCode int, wParam uintptr, lParam uintptr) uintptr {
+			if nCode >= 0 {
+				kbd := (*KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
 
-				if isCtrlDown {
-					var key string
-					if kbd.VkCode == VK_F8 {
-						key = "f8"
-					} else if kbd.VkCode == VK_F7 {
-						key = "f7"
-					} else if kbd.VkCode == VK_F6 {
-						key = "f6"
-					} else if kbd.VkCode == VK_F9 {
-						key = "f9"
-					} else if kbd.VkCode == VK_F10 {
-						key = "f10"
-					}
-
-					if key != "" {
-						if globalApp != nil {
-							globalApp.triggerShortcut(key)
-						}
-						// Consume shortcut event
-						return 1
-					}
-				}
-			}
-
-			// 2. Handle Recording
-			globalRecorder.mu.Lock()
-			isRecording := globalRecorder.isRecording
-			globalRecorder.mu.Unlock()
-
-			if isRecording {
-				var actionType ActionType
+				// 1. Handle Shortcuts (Ctrl+Fx) - Only on KeyDown
 				if wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN {
-					actionType = ActionKeyDown
-				} else if wParam == WM_KEYUP || wParam == WM_SYSKEYUP {
-					actionType = ActionKeyUp
+					ret, _, _ := procGetAsyncKeyState.Call(uintptr(VK_CONTROL))
+					isCtrlDown := ret&0x8000 != 0
+
+					if isCtrlDown {
+						var key string
+						if kbd.VkCode == VK_F8 {
+							key = "f8"
+						} else if kbd.VkCode == VK_F7 {
+							key = "f7"
+						} else if kbd.VkCode == VK_F6 {
+							key = "f6"
+						} else if kbd.VkCode == VK_F9 {
+							key = "f9"
+						} else if kbd.VkCode == VK_F10 {
+							key = "f10"
+						}
+
+						if key != "" {
+							if globalApp != nil {
+								globalApp.triggerShortcut(key)
+							}
+							// Consume shortcut event
+							return 1
+						}
+					}
 				}
-				
-				if actionType != "" {
-					keyName, ok := winKeyCodeMap[kbd.VkCode]
-					if ok {
-						RecordEvent(Action{
-							Type: actionType,
-							Key:  keyName,
-						})
+
+				// 2. Handle Recording
+				globalRecorder.mu.Lock()
+				isRecording := globalRecorder.isRecording
+				globalRecorder.mu.Unlock()
+
+				if isRecording {
+					var actionType ActionType
+					if wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN {
+						actionType = ActionKeyDown
+					} else if wParam == WM_KEYUP || wParam == WM_SYSKEYUP {
+						actionType = ActionKeyUp
+					}
+
+					if actionType != "" {
+						keyName, ok := winKeyCodeMap[kbd.VkCode]
+						if ok {
+							RecordEvent(Action{
+								Type: actionType,
+								Key:  keyName,
+							})
+						}
 					}
 				}
 			}
-		}
-		ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
-		return ret
-	})
+			ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
+			return ret
+		})
 
-	keyboardHook, _, _ := procSetWindowsHookEx.Call(
-		WH_KEYBOARD_LL,
-		keyboardCallback,
-		0,
-		0,
-	)
+		keyboardHook, _, _ := procSetWindowsHookEx.Call(
+			WH_KEYBOARD_LL,
+			keyboardCallback,
+			0,
+			0,
+		)
 
-	// MOUSE HOOK
-	mouseCallback := syscall.NewCallback(func(nCode int, wParam uintptr, lParam uintptr) uintptr {
-		if nCode >= 0 {
-			globalRecorder.mu.Lock()
-			isRecording := globalRecorder.isRecording
-			globalRecorder.mu.Unlock()
+		// MOUSE HOOK
+		mouseCallback := syscall.NewCallback(func(nCode int, wParam uintptr, lParam uintptr) uintptr {
+			if nCode >= 0 {
+				globalRecorder.mu.Lock()
+				isRecording := globalRecorder.isRecording
+				globalRecorder.mu.Unlock()
 
-			if isRecording {
-				ms := (*MSLLHOOKSTRUCT)(unsafe.Pointer(lParam))
-				x, y := int(ms.Pt.X), int(ms.Pt.Y)
-				
-				var action Action
-				action.X = x
-				action.Y = y
-				
-				recorded := true
-				
-				switch wParam {
-				case WM_MOUSEMOVE:
-					action.Type = ActionMouseMove
-				case WM_LBUTTONDOWN:
-					action.Type = ActionMouseDown
-					action.Button = "left"
-				case WM_LBUTTONUP:
-					action.Type = ActionMouseUp
-					action.Button = "left"
-				case WM_RBUTTONDOWN:
-					action.Type = ActionMouseDown
-					action.Button = "right"
-				case WM_RBUTTONUP:
-					action.Type = ActionMouseUp
-					action.Button = "right"
-				case WM_MBUTTONDOWN:
-					action.Type = ActionMouseDown
-					action.Button = "center"
-				case WM_MBUTTONUP:
-					action.Type = ActionMouseUp
-					action.Button = "center"
-				default:
-					recorded = false
-				}
-				
-				if recorded {
-					RecordEvent(action)
+				if isRecording {
+					ms := (*MSLLHOOKSTRUCT)(unsafe.Pointer(lParam))
+					x, y := int(ms.Pt.X), int(ms.Pt.Y)
+
+					var action Action
+					action.X = x
+					action.Y = y
+
+					recorded := true
+
+					switch wParam {
+					case WM_MOUSEMOVE:
+						action.Type = ActionMouseMove
+					case WM_LBUTTONDOWN:
+						action.Type = ActionMouseDown
+						action.Button = "left"
+					case WM_LBUTTONUP:
+						action.Type = ActionMouseUp
+						action.Button = "left"
+					case WM_RBUTTONDOWN:
+						action.Type = ActionMouseDown
+						action.Button = "right"
+					case WM_RBUTTONUP:
+						action.Type = ActionMouseUp
+						action.Button = "right"
+					case WM_MBUTTONDOWN:
+						action.Type = ActionMouseDown
+						action.Button = "center"
+					case WM_MBUTTONUP:
+						action.Type = ActionMouseUp
+						action.Button = "center"
+					case WM_MOUSEWHEEL:
+						action.Type = ActionScroll
+						action.ScrollY = int(int16(ms.MouseData >> 16))
+					case WM_MOUSEHWHEEL:
+						action.Type = ActionScroll
+						action.ScrollX = int(int16(ms.MouseData >> 16))
+					default:
+						recorded = false
+					}
+
+					if recorded {
+						RecordEvent(action)
+					}
 				}
 			}
+			ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
+			return ret
+		})
+
+		mouseHook, _, _ := procSetWindowsHookEx.Call(
+			WH_MOUSE_LL,
+			mouseCallback,
+			0,
+			0,
+		)
+
+		// Avoid unused variable error
+		_ = keyboardHook
+		_ = mouseHook
+
+		// Message loop
+		var msg struct {
+			hwnd    syscall.Handle
+			message uint32
+			wParam  uintptr
+			lParam  uintptr
+			time    uint32
+			pt      struct{ x, y int32 }
 		}
-		ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
-		return ret
+
+		for {
+			ret, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+			if ret == 0 {
+				break
+			}
+		}
 	})
-
-	mouseHook, _, _ := procSetWindowsHookEx.Call(
-		WH_MOUSE_LL,
-		mouseCallback,
-		0,
-		0,
-	)
-
-	// Avoid unused variable error
-	_ = keyboardHook
-	_ = mouseHook
-
-	// Message loop
-	var msg struct {
-		hwnd    syscall.Handle
-		message uint32
-		wParam  uintptr
-		lParam  uintptr
-		time    uint32
-		pt      struct{ x, y int32 }
-	}
-
-	for {
-		ret, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
-		if ret == 0 {
-			break
-		}
-	}
 }

@@ -2,7 +2,7 @@
 
 # Configuration
 APP_NAME="Clicker"
-VERSION="v1.2.14"
+VERSION="v1.2.0"
 OUTPUT_DIR="build/release"
 BIN_DIR="build/bin"
 WAILS_CMD="/Users/mahiro/go/bin/wails"

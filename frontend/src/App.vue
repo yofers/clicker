@@ -31,12 +31,16 @@ const selectedFile = ref('')
 const recordingFilename = ref('')
 const recordingFeedback = ref('')
 const playbackFeedback = ref('')
+const playbackStoppingManually = ref(false)
 
 const formatFileName = (name) => {
     return name ? name.replace(/\.yfc$/, '') : ''
 }
 
 const keys = [
+  { value: 'Ctrl', label: 'Ctrl' },
+  { value: 'Shift', label: 'Shift' },
+  { value: 'Alt', label: 'Alt' },
   { value: 'Space', label: 'Space (空格)' },
   { value: 'Enter', label: 'Enter (回车)' },
   { value: 'Tab', label: 'Tab (制表)' },
@@ -133,13 +137,62 @@ const switchAppMode = () => {
   }
 }
 
-const toggleMode = () => {
-  // Allow switching even if running
-  mode.value = mode.value === 'mouse' ? 'keyboard' : 'mouse'
+const toggleMode = (targetMode) => {
+  if (targetMode === 'mouse' && !shouldDisableMouseBtn.value) {
+      mode.value = 'mouse'
+  } else if (targetMode === 'keyboard' && !shouldDisableKeyboardBtn.value) {
+      mode.value = 'keyboard'
+  }
 }
 
 const isCurrentModeRunning = () => {
     return mode.value === 'mouse' ? !!mouseRunMode.value : !!keyboardRunMode.value
+}
+
+const stopAutomationTasks = async () => {
+    let stopped = false
+    if (mouseRunMode.value) {
+        await StopClicking('mouse')
+        mouseRunMode.value = null
+        stopped = true
+    }
+    if (keyboardRunMode.value) {
+        await StopClicking('keyboard')
+        keyboardRunMode.value = null
+        stopped = true
+    }
+    if (stopped) {
+        updateActiveTasks()
+    }
+    return stopped
+}
+
+const prepareForAutomationStart = async () => {
+    if (isRecording.value) {
+        message.value = "录制中，先结束录制再启动连点或长按"
+        return false
+    }
+    if (isPlaying.value) {
+        await stopPlay()
+    }
+    return true
+}
+
+const prepareForRecordingStart = async () => {
+    if (isPlaying.value) {
+        await stopPlay()
+    }
+    await stopAutomationTasks()
+    return true
+}
+
+const prepareForPlaybackStart = async () => {
+    if (isRecording.value) {
+        message.value = "录制中，先结束录制再执行回放"
+        return false
+    }
+    await stopAutomationTasks()
+    return true
 }
 
 const toggle = async () => {
@@ -147,6 +200,9 @@ const toggle = async () => {
 
   // Check permission before starting new task
   if (!currentRunning) {
+      const canStart = await prepareForAutomationStart()
+      if (!canStart) return
+
       // Check if we can start (is button disabled?)
       // Actually toggle is called by button click or shortcut.
       // If via shortcut, we must check if we are allowed to start.
@@ -218,6 +274,7 @@ const toggleRecording = async () => {
         try {
             const filename = await StopRecording()
             isRecording.value = false
+            recordingFeedback.value = ''
             message.value = `录制完成: ${filename}`
             // Auto switch to execute mode
             await loadRecordings()
@@ -230,12 +287,12 @@ const toggleRecording = async () => {
     } else {
         // Check permissions first
         try {
+            await prepareForRecordingStart()
             const allowed = await CheckPermission()
             if (!allowed) {
                  alert("请在系统设置 -> 隐私与安全性 -> 辅助功能中授予本应用权限，然后重试。")
                  return
             }
-            console.log("DEBUG: Calling StartRecording with:", recordingFilename.value)
             await StartRecording(recordingFilename.value)
             isRecording.value = true
             message.value = "正在录制..."
@@ -259,6 +316,9 @@ const playRec = async () => {
     }
 
     try {
+        const canStart = await prepareForPlaybackStart()
+        if (!canStart) return
+
         currentPlayingFile.value = selectedFile.value
         isPlaying.value = true
         message.value = `正在回放: ${selectedFile.value}`
@@ -274,6 +334,7 @@ const playRec = async () => {
 
 const stopPlay = async () => {
     try {
+        playbackStoppingManually.value = true
         await StopPlayback()
         isPlaying.value = false
         currentPlayingFile.value = ''
@@ -282,6 +343,8 @@ const stopPlay = async () => {
         updateActiveTasks()
     } catch (e) {
         message.value = `停止回放失败: ${e}`
+    } finally {
+        playbackStoppingManually.value = false
     }
 }
 
@@ -311,14 +374,7 @@ const setRecorderMode = (mode) => {
 }
 
 const stopAll = async () => {
-    if (mouseRunMode.value) {
-        await StopClicking('mouse')
-        mouseRunMode.value = null
-    }
-    if (keyboardRunMode.value) {
-        await StopClicking('keyboard')
-        keyboardRunMode.value = null
-    }
+    await stopAutomationTasks()
     
     // Stop Playback if running
     if (isPlaying.value) {
@@ -450,6 +506,17 @@ onMounted(async () => {
     EventsOn("playback-feedback", (msg) => {
         playbackFeedback.value = msg
     })
+
+    EventsOn("playback-stopped", () => {
+        const finishedFile = currentPlayingFile.value
+        isPlaying.value = false
+        currentPlayingFile.value = ''
+        playbackFeedback.value = ''
+        updateActiveTasks()
+        if (!playbackStoppingManually.value && finishedFile) {
+            message.value = `回放完成: ${finishedFile}`
+        }
+    })
   } catch (e) {
     console.error("Wails runtime not ready", e)
   }
@@ -555,8 +622,8 @@ onUnmounted(() => {
     </div>
 
     <div class="mode-switch">
-        <button class="mode-btn" :class="{ active: mode === 'mouse' }" @click="toggleMode" :disabled="shouldDisableMouseBtn">鼠标{{ appMode === 'clicker' ? '连点' : '长按' }}</button>
-        <button class="mode-btn" :class="{ active: mode === 'keyboard' }" @click="toggleMode" :disabled="shouldDisableKeyboardBtn">键盘{{ appMode === 'clicker' ? '连点' : '长按' }}</button>
+        <button class="mode-btn" :class="{ active: mode === 'mouse' }" @click="toggleMode('mouse')" :disabled="shouldDisableMouseBtn">鼠标{{ appMode === 'clicker' ? '连点' : '长按' }}</button>
+        <button class="mode-btn" :class="{ active: mode === 'keyboard' }" @click="toggleMode('keyboard')" :disabled="shouldDisableKeyboardBtn">键盘{{ appMode === 'clicker' ? '连点' : '长按' }}</button>
     </div>
 
     <div v-if="mode === 'mouse'" class="input-group">

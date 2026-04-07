@@ -9,13 +9,14 @@ extern void onF9Pressed();
 extern void onF10Pressed();
 
 extern int isRecording();
-extern void onRecordInput(int type, int x, int y, int button, int keyCode);
+extern void onRecordInput(int type, int x, int y, int button, int keyCode, int scrollX, int scrollY);
 
 #define EVT_MOVE 0
 #define EVT_DOWN 1
 #define EVT_UP 2
 #define EVT_KEYDOWN 3
 #define EVT_KEYUP 4
+#define EVT_SCROLL 5
 
 // Event callback function
 CGEventRef eventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
@@ -40,27 +41,34 @@ CGEventRef eventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef eve
         int y = (int)loc.y;
 
         if (type == kCGEventMouseMoved || type == kCGEventLeftMouseDragged || type == kCGEventRightMouseDragged || type == kCGEventOtherMouseDragged) {
-            onRecordInput(EVT_MOVE, x, y, 0, 0);
+            onRecordInput(EVT_MOVE, x, y, 0, 0, 0, 0);
         } 
         else if (type == kCGEventLeftMouseDown) {
-            onRecordInput(EVT_DOWN, x, y, 0, 0);
+            onRecordInput(EVT_DOWN, x, y, 0, 0, 0, 0);
         } 
         else if (type == kCGEventLeftMouseUp) {
-            onRecordInput(EVT_UP, x, y, 0, 0);
+            onRecordInput(EVT_UP, x, y, 0, 0, 0, 0);
         } 
         else if (type == kCGEventRightMouseDown) {
-            onRecordInput(EVT_DOWN, x, y, 1, 0);
+            onRecordInput(EVT_DOWN, x, y, 1, 0, 0, 0);
         } 
         else if (type == kCGEventRightMouseUp) {
-            onRecordInput(EVT_UP, x, y, 1, 0);
+            onRecordInput(EVT_UP, x, y, 1, 0, 0, 0);
         } 
         else if (type == kCGEventOtherMouseDown) {
             int btn = (int)CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber);
-            onRecordInput(EVT_DOWN, x, y, btn, 0);
+            onRecordInput(EVT_DOWN, x, y, btn, 0, 0, 0);
         } 
         else if (type == kCGEventOtherMouseUp) {
             int btn = (int)CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber);
-            onRecordInput(EVT_UP, x, y, btn, 0);
+            onRecordInput(EVT_UP, x, y, btn, 0, 0, 0);
+        } 
+        else if (type == kCGEventScrollWheel) {
+            int scrollY = (int)CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1);
+            int scrollX = (int)CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis2);
+            if (scrollX != 0 || scrollY != 0) {
+                onRecordInput(EVT_SCROLL, x, y, 0, 0, scrollX, scrollY);
+            }
         } 
         else if (type == kCGEventKeyDown) {
             CGKeyCode keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
@@ -68,12 +76,12 @@ CGEventRef eventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef eve
             // Usually recorders capture everything. But autorepeat might spam.
             // Let's keep autorepeat for now as some games rely on it, or filter it if needed.
             if (CGEventGetIntegerValueField(event, kCGKeyboardEventAutorepeat) == 0) {
-                 onRecordInput(EVT_KEYDOWN, x, y, 0, (int)keycode);
+                 onRecordInput(EVT_KEYDOWN, x, y, 0, (int)keycode, 0, 0);
             }
         } 
         else if (type == kCGEventKeyUp) {
             CGKeyCode keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
-             onRecordInput(EVT_KEYUP, x, y, 0, (int)keycode);
+             onRecordInput(EVT_KEYUP, x, y, 0, (int)keycode, 0, 0);
         }
     }
 
@@ -87,10 +95,11 @@ int startKeyboardListener() {
                             CGEventMaskBit(kCGEventLeftMouseDown) |
                             CGEventMaskBit(kCGEventLeftMouseUp) |
                             CGEventMaskBit(kCGEventRightMouseDown) |
-                            CGEventMaskBit(kCGEventRightMouseUp) |
-                            CGEventMaskBit(kCGEventOtherMouseDown) |
-                            CGEventMaskBit(kCGEventOtherMouseUp) |
-                            CGEventMaskBit(kCGEventLeftMouseDragged) |
+	                            CGEventMaskBit(kCGEventRightMouseUp) |
+	                            CGEventMaskBit(kCGEventOtherMouseDown) |
+	                            CGEventMaskBit(kCGEventOtherMouseUp) |
+	                            CGEventMaskBit(kCGEventScrollWheel) |
+	                            CGEventMaskBit(kCGEventLeftMouseDragged) |
                             CGEventMaskBit(kCGEventRightMouseDragged) |
                             CGEventMaskBit(kCGEventOtherMouseDragged);
                             

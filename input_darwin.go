@@ -121,6 +121,14 @@ void cgoKeyUp(int keyCode) {
     CFRelease(source);
 }
 
+void cgoScroll(int deltaX, int deltaY) {
+    CGEventRef event = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 2, deltaY, deltaX);
+    if (event != NULL) {
+        CGEventPost(kCGHIDEventTap, event);
+        CFRelease(event);
+    }
+}
+
 bool checkAccessibility();
 void cgoMouseLocation(int *x, int *y);
 void cgoMouseMove(int x, int y);
@@ -128,6 +136,7 @@ void cgoMouseDown(int x, int y, int button);
 void cgoMouseUp(int x, int y, int button);
 void cgoKeyDown(int keyCode);
 void cgoKeyUp(int keyCode);
+void cgoScroll(int deltaX, int deltaY);
 */
 import "C"
 import "time"
@@ -213,13 +222,7 @@ func keyHold(key string, start bool) {
 	}
 }
 
-// Recorder Wrappers
-
-func moveMouse(x, y int) {
-	C.cgoMouseMove(C.int(x), C.int(y))
-}
-
-func mouseToggle(btn string, down bool) {
+func mouseToggleAt(btn string, down bool, x, y int) {
 	var code int
 	switch btn {
 	case "left":
@@ -236,14 +239,23 @@ func mouseToggle(btn string, down bool) {
 		code = 0
 	}
 
+	if down {
+		C.cgoMouseDown(C.int(x), C.int(y), C.int(code))
+	} else {
+		C.cgoMouseUp(C.int(x), C.int(y), C.int(code))
+	}
+}
+
+// Recorder Wrappers
+
+func moveMouse(x, y int) {
+	C.cgoMouseMove(C.int(x), C.int(y))
+}
+
+func mouseToggle(btn string, down bool) {
 	var x, y C.int
 	C.cgoMouseLocation(&x, &y)
-
-	if down {
-		C.cgoMouseDown(x, y, C.int(code))
-	} else {
-		C.cgoMouseUp(x, y, C.int(code))
-	}
+	mouseToggleAt(btn, down, int(x), int(y))
 }
 
 func keyToggle(key string, down bool) {
@@ -254,4 +266,8 @@ func keyToggle(key string, down bool) {
 			C.cgoKeyUp(C.int(code))
 		}
 	}
+}
+
+func scrollMouse(deltaX, deltaY int) {
+	C.cgoScroll(C.int(deltaX), C.int(deltaY))
 }

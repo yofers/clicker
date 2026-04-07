@@ -62,7 +62,7 @@ var globalRecorder = &Recorder{}
 var activeKeys = make(map[string]time.Time)
 var activeKeysMu sync.Mutex
 
-func updateActiveState(ctx context.Context, action Action) string {
+func updateActiveState(action Action) string {
 	activeKeysMu.Lock()
 	defer activeKeysMu.Unlock()
 
@@ -167,7 +167,6 @@ func decrypt(data []byte) ([]byte, error) {
 // App Methods for Recorder
 
 func (a *App) StartRecording(filename string) error {
-	fmt.Printf("DEBUG: StartRecording called with filename: '%s'\n", filename)
 	globalRecorder.mu.Lock()
 	defer globalRecorder.mu.Unlock()
 
@@ -224,15 +223,25 @@ func (a *App) StartRecording(filename string) error {
 
 func (a *App) StopRecording() (string, error) {
 	globalRecorder.mu.Lock()
-	defer globalRecorder.mu.Unlock()
-
 	if !globalRecorder.isRecording {
+		globalRecorder.mu.Unlock()
 		return "", nil
 	}
 	globalRecorder.isRecording = false
+	actions := append([]Action(nil), globalRecorder.actions...)
+	filename := globalRecorder.currentFilename
+	ctx := globalRecorder.ctx
+	globalRecorder.mu.Unlock()
+
+	activeKeysMu.Lock()
+	activeKeys = make(map[string]time.Time)
+	activeKeysMu.Unlock()
+	if ctx != nil {
+		runtime.EventsEmit(ctx, "recording-feedback", "")
+	}
 
 	// Save to file
-	data, err := json.Marshal(globalRecorder.actions)
+	data, err := json.Marshal(actions)
 	if err != nil {
 		return "", err
 	}
@@ -242,7 +251,6 @@ func (a *App) StopRecording() (string, error) {
 		return "", err
 	}
 
-	filename := globalRecorder.currentFilename
 	if filename == "" {
 		filename = fmt.Sprintf("recording_%s.yfc", time.Now().Format("2006_01_02_15_04_05"))
 	}
@@ -383,8 +391,8 @@ func (a *App) PlayRecording(filename string, loopInterval int, loopCount int) er
 				}
 
 				// Emit feedback event
-				feedback := updateActiveState(a.ctx, action)
-				if feedback != "" {
+				feedback := updateActiveState(action)
+				if a.ctx != nil {
 					runtime.EventsEmit(a.ctx, "playback-feedback", feedback)
 				}
 
@@ -574,7 +582,11 @@ func (a *App) StopPlayback() {
 			globalRecorder.stopPlayChan = nil
 		}
 		globalRecorder.isPlaying = false
+		activeKeysMu.Lock()
+		activeKeys = make(map[string]time.Time)
+		activeKeysMu.Unlock()
 		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "playback-feedback", "")
 			runtime.EventsEmit(a.ctx, "playback-stopped", true)
 		}
 	}
@@ -583,12 +595,20 @@ func (a *App) StopPlayback() {
 // RecordEvent is called by hooks
 func RecordEvent(action Action) {
 	globalRecorder.mu.Lock()
-	defer globalRecorder.mu.Unlock()
+	if !globalRecorder.isRecording {
+		globalRecorder.mu.Unlock()
+		return
+	}
+	action.Timestamp = time.Since(globalRecorder.startTime).Milliseconds()
+	globalRecorder.actions = append(globalRecorder.actions, action)
+	ctx := globalRecorder.ctx
+	globalRecorder.mu.Unlock()
 
-	if globalRecorder.isRecording {
-		// Set relative timestamp
-		action.Timestamp = time.Since(globalRecorder.startTime).Milliseconds()
-		globalRecorder.actions = append(globalRecorder.actions, action)
+	switch action.Type {
+	case ActionMouseDown, ActionMouseUp, ActionKeyDown, ActionKeyUp:
+		if ctx != nil {
+			runtime.EventsEmit(ctx, "recording-feedback", updateActiveState(action))
+		}
 	}
 }
 
@@ -598,9 +618,11 @@ func executeAction(a Action) {
 	case ActionMouseMove:
 		moveMouse(a.X, a.Y)
 	case ActionMouseDown:
-		mouseToggle(a.Button, true)
+		mouseToggleAt(a.Button, true, a.X, a.Y)
 	case ActionMouseUp:
-		mouseToggle(a.Button, false)
+		mouseToggleAt(a.Button, false, a.X, a.Y)
+	case ActionScroll:
+		scrollMouse(a.ScrollX, a.ScrollY)
 	case ActionKeyDown:
 		keyToggle(a.Key, true)
 	case ActionKeyUp:

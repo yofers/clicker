@@ -25,6 +25,8 @@ const (
 	MOUSEEVENTF_MIDDLEUP   = 0x0040
 	MOUSEEVENTF_XDOWN      = 0x0080
 	MOUSEEVENTF_XUP        = 0x0100
+	MOUSEEVENTF_WHEEL      = 0x0800
+	MOUSEEVENTF_HWHEEL     = 0x1000
 	MOUSEEVENTF_ABSOLUTE   = 0x8000
 
 	XBUTTON1 = 0x0001
@@ -188,7 +190,7 @@ func moveMouse(x, y int) {
 	procSetCursorPos.Call(uintptr(x), uintptr(y))
 }
 
-func mouseToggle(btn string, down bool) {
+func mouseToggleAt(btn string, down bool, x, y int) {
 	var flag uint32
 	var data uint32
 
@@ -233,7 +235,14 @@ func mouseToggle(btn string, down bool) {
 		}
 	}
 
+	procSetCursorPos.Call(uintptr(x), uintptr(y))
 	procMouseEvent.Call(uintptr(flag), 0, 0, uintptr(data), 0)
+}
+
+func mouseToggle(btn string, down bool) {
+	var pt POINT
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	mouseToggleAt(btn, down, int(pt.X), int(pt.Y))
 }
 
 func keyToggle(key string, down bool) {
@@ -253,5 +262,14 @@ func keyToggle(key string, down bool) {
 			flag = KEYEVENTF_KEYUP
 		}
 		procKeybdEvent.Call(uintptr(vk), 0, flag, 0)
+	}
+}
+
+func scrollMouse(deltaX, deltaY int) {
+	if deltaY != 0 {
+		procMouseEvent.Call(uintptr(MOUSEEVENTF_WHEEL), 0, 0, uintptr(uint32(int32(deltaY))), 0)
+	}
+	if deltaX != 0 {
+		procMouseEvent.Call(uintptr(MOUSEEVENTF_HWHEEL), 0, 0, uintptr(uint32(int32(deltaX))), 0)
 	}
 }

@@ -9,16 +9,32 @@ extern int startKeyboardListener();
 import "C"
 import (
 	"runtime"
+	"sync"
+)
+
+var (
+	darwinListenerMu      sync.Mutex
+	darwinListenerStarted bool
 )
 
 func startGlobalListener() {
 	// Only start listener if permission is granted, otherwise we risk blocking the app or causing issues
-	if CheckAccessibility() {
-		go func() {
-			runtime.LockOSThread()
-			C.startKeyboardListener()
-		}()
+	if !CheckAccessibility() {
+		return
 	}
+
+	darwinListenerMu.Lock()
+	if darwinListenerStarted {
+		darwinListenerMu.Unlock()
+		return
+	}
+	darwinListenerStarted = true
+	darwinListenerMu.Unlock()
+
+	go func() {
+		runtime.LockOSThread()
+		C.startKeyboardListener()
+	}()
 }
 
 //export onF8Pressed
@@ -112,16 +128,16 @@ func init() {
 }
 
 //export onRecordInput
-func onRecordInput(eventType int, x, y int, button int, keyCode int) {
-	// eventType: 0=Move, 1=Down, 2=Up, 3=KeyDown, 4=KeyUp
-	
+func onRecordInput(eventType int, x, y int, button int, keyCode int, scrollX int, scrollY int) {
+	// eventType: 0=Move, 1=Down, 2=Up, 3=KeyDown, 4=KeyUp, 5=Scroll
+
 	// Fast check again (though C side should have checked)
 	// We do this asynchronously to not block the C callback too much?
 	// Actually C callback blocks the event tap. We should be fast.
 	// But RecordEvent takes a lock.
-	
+
 	action := Action{
-		X: x, 
+		X: x,
 		Y: y,
 	}
 
@@ -131,22 +147,34 @@ func onRecordInput(eventType int, x, y int, button int, keyCode int) {
 	case 1: // Down
 		action.Type = ActionMouseDown
 		switch button {
-		case 0: action.Button = "left"
-		case 1: action.Button = "right"
-		case 2: action.Button = "center"
-		case 3: action.Button = "side1"
-		case 4: action.Button = "side2"
-		default: action.Button = "unknown"
+		case 0:
+			action.Button = "left"
+		case 1:
+			action.Button = "right"
+		case 2:
+			action.Button = "center"
+		case 3:
+			action.Button = "side1"
+		case 4:
+			action.Button = "side2"
+		default:
+			action.Button = "unknown"
 		}
 	case 2: // Up
 		action.Type = ActionMouseUp
 		switch button {
-		case 0: action.Button = "left"
-		case 1: action.Button = "right"
-		case 2: action.Button = "center"
-		case 3: action.Button = "side1"
-		case 4: action.Button = "side2"
-		default: action.Button = "unknown"
+		case 0:
+			action.Button = "left"
+		case 1:
+			action.Button = "right"
+		case 2:
+			action.Button = "center"
+		case 3:
+			action.Button = "side1"
+		case 4:
+			action.Button = "side2"
+		default:
+			action.Button = "unknown"
 		}
 	case 3: // KeyDown
 		action.Type = ActionKeyDown
@@ -154,7 +182,7 @@ func onRecordInput(eventType int, x, y int, button int, keyCode int) {
 			action.Key = name
 		} else {
 			// Unknown key, maybe ignore or record code?
-			return 
+			return
 		}
 	case 4: // KeyUp
 		action.Type = ActionKeyUp
@@ -163,6 +191,10 @@ func onRecordInput(eventType int, x, y int, button int, keyCode int) {
 		} else {
 			return
 		}
+	case 5: // Scroll
+		action.Type = ActionScroll
+		action.ScrollX = scrollX
+		action.ScrollY = scrollY
 	}
 
 	RecordEvent(action)

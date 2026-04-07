@@ -1,5 +1,11 @@
 package main
 
+import "sync"
+
+var linuxListenerOnce sync.Once
+
 func startGlobalListener() {
-	// TODO: Linux implementation
+	linuxListenerOnce.Do(func() {
+		// TODO: Linux implementation
+	})
 }

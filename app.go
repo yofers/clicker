@@ -10,7 +10,6 @@ import (
 
 var globalApp *App
 
-
 // App struct
 type App struct {
 	ctx              context.Context
@@ -35,6 +34,78 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) triggerShortcut(key string) {
 	runtime.EventsEmit(a.ctx, "shortcut-pressed", key)
+}
+
+func normalizeKeyboardSequence(keys []string) []string {
+	modifierPriority := map[string]int{
+		"Ctrl":     0,
+		"Shift":    1,
+		"Alt":      2,
+		"Command":  3,
+		"Win":      3,
+		"Fn":       4,
+		"CapsLock": 5,
+	}
+
+	seen := make(map[string]bool)
+	orderedModifiers := make([]string, 0, len(keys))
+	orderedKeys := make([]string, 0, len(keys))
+
+	for _, key := range keys {
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if _, isModifier := modifierPriority[key]; isModifier {
+			insertAt := len(orderedModifiers)
+			for i, existing := range orderedModifiers {
+				if modifierPriority[key] < modifierPriority[existing] {
+					insertAt = i
+					break
+				}
+			}
+			orderedModifiers = append(orderedModifiers, "")
+			copy(orderedModifiers[insertAt+1:], orderedModifiers[insertAt:])
+			orderedModifiers[insertAt] = key
+			continue
+		}
+		orderedKeys = append(orderedKeys, key)
+	}
+
+	return append(orderedModifiers, orderedKeys...)
+}
+
+func pressKeyboardSequence(keys []string) {
+	for _, key := range normalizeKeyboardSequence(keys) {
+		keyToggle(key, true)
+	}
+}
+
+func releaseKeyboardSequence(keys []string) {
+	ordered := normalizeKeyboardSequence(keys)
+	for i := len(ordered) - 1; i >= 0; i-- {
+		keyToggle(ordered[i], false)
+	}
+}
+
+func clickKeyboardSequence(keys []string, clickType string, duration int) {
+	doChord := func() {
+		pressKeyboardSequence(keys)
+		releaseKeyboardSequence(keys)
+	}
+
+	switch clickType {
+	case "double":
+		doChord()
+		time.Sleep(50 * time.Millisecond)
+		doChord()
+	case "long":
+		pressKeyboardSequence(keys)
+		time.Sleep(time.Duration(duration) * time.Millisecond)
+		releaseKeyboardSequence(keys)
+	default:
+		doChord()
+	}
 }
 
 // StartClicking starts the auto clicker
@@ -80,18 +151,6 @@ func (a *App) StartClicking(interval int, mode string, keysOrButtons []string, c
 	}
 
 	go func() {
-		// Global delay for both Clicker and Presser modes
-		// This prevents shortcut interference (e.g. Ctrl+F8 being interpreted as Ctrl+Click)
-		// and gives user time to release keys.
-		time.Sleep(1000 * time.Millisecond)
-
-		// Check if stopped during sleep
-		select {
-		case <-stopChan:
-			return
-		default:
-		}
-
 		if clickType == "hold" {
 
 			// Hold mode: Press Down -> Wait Stop -> Press Up
@@ -100,9 +159,7 @@ func (a *App) StartClicking(interval int, mode string, keysOrButtons []string, c
 					mouseHold(code, true)
 				}
 			} else {
-				for _, k := range keysOrButtons {
-					keyHold(k, true)
-				}
+				pressKeyboardSequence(keysOrButtons)
 			}
 
 			<-stopChan
@@ -112,9 +169,7 @@ func (a *App) StartClicking(interval int, mode string, keysOrButtons []string, c
 					mouseHold(code, false)
 				}
 			} else {
-				for _, k := range keysOrButtons {
-					keyHold(k, false)
-				}
+				releaseKeyboardSequence(keysOrButtons)
 			}
 			// Cleanup channel reference after goroutine finishes?
 			// Ideally StopClicking handles it, but if we need cleanup here:
@@ -139,9 +194,7 @@ func (a *App) StartClicking(interval int, mode string, keysOrButtons []string, c
 					click(code, clickType, longPressDuration)
 				}
 			} else if mode == "keyboard" {
-				for _, k := range keysOrButtons {
-					pressKey(k, clickType, longPressDuration)
-				}
+				clickKeyboardSequence(keysOrButtons, clickType, longPressDuration)
 			}
 
 			// Wait Interval
@@ -187,5 +240,9 @@ func (a *App) Greet(name string) string {
 }
 
 func (a *App) CheckPermission() bool {
-	return CheckAccessibility()
+	allowed := CheckAccessibility()
+	if allowed {
+		startGlobalListener()
+	}
+	return allowed
 }
